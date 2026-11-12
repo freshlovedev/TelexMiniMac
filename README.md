@@ -144,6 +144,22 @@ The typing path now uses three **offline** signals, not just a list of known Eng
 
 Input processing is intended to remain fully local and offline. There is no network-based AI, keylogging archive or cloud telemetry built into the typing path. User-added words and options are local and excluded from Git. Avoid entering real passwords into any demonstration app.
 
+## Telex shape/tone order independence
+
+Telex vowel-shaping keys can appear **after** a tone key without switching to
+English or losing the accent. In particular, `xuosong → xuống` (raw
+`xuo + s + o + ng`) now produces the same composed syllable as
+`xuoosng` and `xuoongs`. The same structural rule works for the other
+five tone keys and similar vowel clusters, as long as the shaped syllable is
+valid Vietnamese. It does not indiscriminately double vowels: `exe → exe`,
+`eex → ễ`, and English words such as `book` remain unchanged.
+
+Both Windows and macOS exercise 25 additional shape-after-tone
+equivalence cases (5 vowel families × 5 tone keys), besides direct
+regression cases for `xuosong`, `muosong`, `cuosong`, `xuofong`
+and `xuorong`. The tests assert immediate composition and word-boundary
+output; they do not substitute for end-to-end host-application typing tests.
+
 ## Typing Engine v3 and advanced settings
 
 Both platforms support Telex (default) and optional VNI (1-5 tone, 6/7/8 vowel shapes, 9 for đ). Select the input method and language priority (Balanced by default, Vietnamese-first or English-first) in advanced preferences. Windows exposes an in-app advanced settings window with configurable V/E shortcut presets, auto-start, exact process exclusion list, and local import/export. macOS offers SwiftUI controls for Telex/VNI, source-local V/E shortcuts, exact bundle ID exclusions, login-item startup and dictionary editing in-app. The macOS login item starts the Settings app; enabling the IMK input source is a separate system choice.

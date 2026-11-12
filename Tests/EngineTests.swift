@@ -88,6 +88,41 @@ import Foundation
             if e.text==raw && e.finish()==raw {passed+=1}
             else {failed+=1;print("FAIL unknown English: \(raw) => \(e.text) / \(e.finish())")}
         }
+        // Shape key after a tone must be equivalent to shaping first.
+        // The tone key may be interleaved between the original and
+        // repeated vowel: xuo + s + o + ng -> xuống.
+        let interleaved:[(String,String)]=[
+            ("xuosong","xuống"),("xuoosng","xuống"),
+            ("xuoongs","xuống"),("muosong","muống"),
+            ("cuosong","cuống"),("xuofong","xuồng"),
+            ("xuorong","xuổng"),("exe","exe"),("eex","ễ"),
+            ("kieeru","kiểu"),("nhieefu","nhiều"),
+            ("vaajy","vậy"),("book","book"),("good","good")
+        ]
+        for (raw,want) in interleaved {
+            let e=TelexComposer()
+            for c in raw {_ = e.push(c)}
+            if e.text==want && e.finish()==want {passed+=1}
+            else {failed+=1;print("FAIL interleaved tone and shape \(raw) => \(e.text)/\(e.finish()), expected \(want)")}
+        }
+        // The second shaping vowel may be typed after any tone mark.
+        // Compare against the ordinary shape-first sequence across families.
+        for stem in ["xuo","muo","cuo","kie","tua"] {
+            guard let last=stem.last else {continue}
+            for mark in "sfrxj" {
+                let before=stem+String(mark)+String(last)+"ng"
+                let after=stem+String(last)+String(mark)+"ng"
+                let first=TelexComposer(),second=TelexComposer()
+                for c in before {_ = first.push(c)}
+                for c in after {_ = second.push(c)}
+                let expected=second.finish()
+                if first.text==expected && first.finish()==expected {
+                    passed+=1
+                } else {
+                    failed+=1;print("FAIL interleaved shape/tone \(before) => \(first.text), expected \(expected)")
+                }
+            }
+        }
         // Metamorphic coverage: for every tone key, moving it before the
         // final vowel of a legitimate diphthong must yield the same Unicode.
         // Covers 30 combinations beyond the manually curated word fixtures.

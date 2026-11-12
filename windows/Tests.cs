@@ -88,6 +88,38 @@ namespace TelexMini
                 Equal("Smart Vietnamese "+word,reference.Text,bilingual.Text);
                 Equal("Smart Vietnamese boundary "+word,reference.Finish(true),bilingual.Finish(true));
             }
+            // Interleaved shape/tone commands must commute for a valid
+            // Vietnamese syllable: xuo + s + o + ng -> xuống.
+            foreach(var pair in new[] {
+                new[]{"xuosong","xuống"},new[]{"xuoosng","xuống"},
+                new[]{"xuoongs","xuống"},new[]{"muosong","muống"},
+                new[]{"cuosong","cuống"},new[]{"xuofong","xuồng"},
+                new[]{"xuorong","xuổng"},new[]{"exe","exe"},
+                new[]{"eex","ễ"},new[]{"kieeru","kiểu"},
+                new[]{"nhieefu","nhiều"},new[]{"vaajy","vậy"},
+                new[]{"book","book"},new[]{"good","good"}
+            }) {
+                var e=new TelexEngine {SmartEnglish=true};
+                foreach(char c in pair[0]) e.Push(c);
+                Equal("Interleaved Telex "+pair[0],pair[1],e.Text);
+                Equal("Interleaved Telex boundary "+pair[0],pair[1],e.Finish(true));
+            }
+            // The vowel-shaping key may come after all five tone keys:
+            // xuo+s+o+ng == xuo+o+s+ng, and likewise for other vowel groups.
+            foreach(string stem in new[]{"xuo","muo","cuo","kie","tua"}) {
+                char vowel=stem[stem.Length-1];
+                foreach(char mark in "sfrxj") {
+                    string before=stem+mark+vowel+"ng";
+                    string after=stem+vowel+mark+"ng";
+                    var a=new TelexEngine {SmartEnglish=true};
+                    var b=new TelexEngine {SmartEnglish=true};
+                    foreach(char c in before) a.Push(c);
+                    foreach(char c in after) b.Push(c);
+                    string expected=b.Finish(true);
+                    Equal("Interleaved vowel shape "+before,expected,a.Text);
+                    Equal("Interleaved vowel shape boundary "+before,expected,a.Finish(true));
+                }
+            }
             // Metamorphic tone-position tests: 6 vowel families x 5 tones.
             // A tone before the last vowel must equal the same tone at the
             // end, regardless of which accent key is used.

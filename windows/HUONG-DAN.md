@@ -90,6 +90,22 @@ kết quả ghép âm tiết tiếng Việt không hợp lệ. Khi hoàn toàn m
 ví dụ `boost → bốt`, ứng dụng ưu tiên tiếng Việt khi chế độ V đang bật;
 chuyển sang E để gõ nguyên văn tiếng Anh.
 
+## Bỏ dấu trước rồi mới gõ phím biến đổi nguyên âm
+
+Trong Telex, có thể gõ phím dấu **trước** phím biến đổi nguyên âm khi
+vẫn tạo thành âm tiết tiếng Việt hợp lệ:
+
+- `xuosong → xuống` (xuo + s + o + ng)
+- `xuoosng → xuống`; `xuoongs → xuống`
+- `muosong → muống`; `cuosong → cuống`
+- `xuofong → xuồng`; `xuorong → xuổng`
+
+Engine kiểm tra hình dạng nguyên âm **sau khi ghép Unicode**, chứ không
+chỉ xem các ký tự phím đứng liền nhau. Quy tắc áp dụng cho nhóm nguyên
+âm và cả năm dấu s/f/r/x/j, nhưng không biến `exe` thành `ễ` hoặc
+phá từ tiếng Anh như `book`. Đã thêm bài kiểm tra 25 tổ hợp vần/dấu
+và các test hồi quy tương ứng trên Windows/macOS.
+
 ## Sửa ưu tiên dấu tức thời
 
 Khi đang chọn V (Telex, Cân bằng / ưu tiên Việt): `as → á` ngay sau

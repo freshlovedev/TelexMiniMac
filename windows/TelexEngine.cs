@@ -194,6 +194,31 @@ namespace TelexMini
             string prior=Text;
             bool toneNow=!UseVni && !literalWord && !foreignWord &&
                          ImmediateToneKey(rawWord,key);
+            // A repeated vowel separated by an effective tone key is
+            // still the Telex shaping command, not a new vowel. This is
+            // valid only when the composed result has a real vowel cluster:
+            // xuo + s + o -> xuố, but ex + e must remain literal "exe".
+            if(!UseVni && !literalWord && lastToneApplied &&
+               rawWord.Length>=3 &&
+               "aeo".IndexOf(char.ToLowerInvariant(key))>=0 &&
+               char.ToLowerInvariant(rawWord[rawWord.Length-2])==char.ToLowerInvariant(key)) {
+                List<int> positions=Vowels(Text);
+                if(positions.Count>=2) {
+                    int i=positions[positions.Count-1];
+                    char k=char.ToLowerInvariant(key);
+                    if(Base(Text[i])==k) {
+                        char[] letters=Text.ToCharArray();
+                        letters[i]=Shape(letters[i],k=='a'?'â':k=='e'?'ê':'ô');
+                        string candidate=Normalize(new string(letters));
+                        if(LooksVietnamese(candidate)) {
+                            rawWord+=key; Text=candidate; telexShaped=true;
+                            englishCandidate=false; lastToneApplied=false;
+                            lastTelexKey=true;
+                            return Text;
+                        }
+                    }
+                }
+            }
             // Test the composed syllable, not raw key spelling. "kieer"
             // contains an extra e for the ê shape, but "kiể" + u is the
             // valid "kiểu". In contrast, "ẽ" + e is not a valid vowel group.

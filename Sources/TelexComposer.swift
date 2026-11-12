@@ -327,6 +327,30 @@ final class TelexComposer {
         let prior=text
         let toneNow = !useVni && !literal && !foreignWord &&
                       Self.immediateToneKey(raw,key)
+        // Vowel + tone + same vowel is a delayed shaping command whenever
+        // the shaped Unicode syllable is structurally valid. xuo+s+o
+        // becomes xuố, and exe remains literal because there is no
+        // second independent vowel in that sequence.
+        let normalizedKey=Character(String(key).lowercased())
+        if !useVni && !literal && lastToneApplied && raw.count>=3 &&
+           "aeo".contains(normalizedKey),
+           Array(raw.lowercased())[raw.count-2]==normalizedKey {
+            var letters=Array(text)
+            let positions=Self.vowels(letters)
+            if positions.count>=2,let i=positions.last,
+               Self.root(letters[i])==normalizedKey {
+                let shape:Character=normalizedKey=="a" ? "â" :
+                    normalizedKey=="e" ? "ê" : "ô"
+                letters[i]=Self.alter(letters[i],shape:shape)
+                let candidate=Self.normalize(String(letters))
+                if Self.looksVietnamese(candidate) {
+                    raw.append(key);text=candidate;telexShaped=true
+                    englishCandidate=false;lastToneApplied=false
+                    lastTelexKey=true
+                    return text
+                }
+            }
+        }
         // Validate the ACTUAL composed syllable after extending the vowel,
         // not the raw key sequence (which may contain an earlier ee/aa/oo).
         // kieer + u -> kiểu, nhieef + u -> nhiều, vaaj + y -> vậy.
