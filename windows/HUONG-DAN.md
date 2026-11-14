@@ -2,6 +2,23 @@
 
 Bộ gõ Telex nhỏ cho Windows, viết bằng C# / Windows Forms. Chạy trực tiếp `TelexMini.exe`, không cần trình cài đặt. Dùng .NET Framework 4.x có sẵn trên Windows 10/11 thông thường.
 
+## Kiểm thử Đợt 1 — Nền tảng ổn định
+
+Bản mã được phân tách rõ phần nhận diện Anh–Việt và phần xử lý phím
+Telex/VNI. Bộ test mới dùng 4.700 trường hợp Unicode chuẩn (cùng dữ liệu
+với macOS), kiểm tra cả cách tính số Backspace và chuỗi chèn thay thế
+trên một ô văn bản mô phỏng. Lệnh `build.ps1` tự chạy `test.ps1` trước,
+chỉ ghi đè `TelexMini.exe` nếu test thành công.
+
+Nếu Windows từ chối toàn bộ sự kiện thay thế ký tự, hook sẽ nhường phím
+gốc thay vì làm mất phím. Trường hợp gửi được một phần vẫn báo lỗi;
+không có bảo đảm sửa được mọi trình soạn thảo khi chưa test thực tế.
+
+Kiểm thử phím thật qua WinForms đã được thử nhưng bị chặn do cửa sổ
+kiểm thử không giữ được foreground trong phiên máy ảo. Xem
+`PHASE1-REPORT.md` tại thư mục gốc repo để biết các điều kiện còn
+phải hoàn thành trước khi phát hành.
+
 ## Dùng ngay
 
 1. Tắt bộ gõ khác như UniKey/EVKey nếu đang bật.

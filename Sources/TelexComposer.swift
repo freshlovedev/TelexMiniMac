@@ -135,12 +135,8 @@ final class TelexComposer {
         literal=true
         text=value
     }
-    private func core(_ key: Character) {
-        let k=Character(String(key).lowercased())
-        if text.count >= 64 { literal=true }
-        if literal { text.append(key); return }
-        let a=Array(text)
-        if useVni {
+    // VNI digits 1-9 never flow into Telex vowel/tone composition.
+    private func vniCore(_ key:Character,_ k:Character,_ a:[Character]) {
             guard let digit=k.wholeNumberValue, digit>=1, digit<=9,
                 !Self.impossibleVietnamese(text) else {
                 text=Self.normalize(text+String(key)); return
@@ -181,7 +177,13 @@ final class TelexComposer {
                 }
             }
             text.append(key);return
-        }
+    }
+    private func core(_ key: Character) {
+        let k=Character(String(key).lowercased())
+        if text.count >= 64 { literal=true }
+        if literal { text.append(key); return }
+        let a=Array(text)
+        if useVni {vniCore(key,k,a);return}
         if let t=Self.tones.firstIndex(of:k), !Self.vowels(a).isEmpty {
             let current=a.map(Self.tone).last(where: { $0 > 0 }) ?? 0
             if t == 0 {
@@ -289,6 +291,32 @@ final class TelexComposer {
               let last=raw.last,raw.count>=2 else {return false}
         return "sfrxj".contains(Character(String(last).lowercased()))
     }
+    // English recognition never mutates the shaped syllable. It returns
+    // a decision that the input state machine applies after Telex editing.
+    private enum PrefixAction { case compose, protectEnglish, preserveForeign }
+    private func classifyPrefix(shapeNow:Bool,toneNow:Bool)->PrefixAction {
+        guard smartEnglish && !useVni && !literal &&
+              !Self.preferVietnamesePrefix(raw) else {return .compose}
+        if foreignWord || Self.foreignStart(raw) {return .preserveForeign}
+        if !shapeNow && !toneNow &&
+           (!telexShaped || (Self.english.contains(raw.lowercased()) &&
+             (preferEnglishExact || !Self.looksVietnamese(text)))) &&
+           Self.isEnglishPrefix(raw) {return .protectEnglish}
+        return .compose
+    }
+    private func mustRecoverInvalidWord()->Bool {
+        smartEnglish && !useVni && !literal &&
+            !Self.preferVietnamesePrefix(raw) &&
+            raw != text && Self.impossibleVietnamese(text)
+    }
+    private func applyComposition(_ key:Character) {
+        if englishCandidate {
+            englishCandidate=false
+            let keys=raw
+            text=""; literal=false
+            for c in keys {core(c)}
+        } else {core(key)}
+    }
     func push(_ key: Character) -> String {
         if let pending=pendingEscapeRaw {
             let candidate=pending+String(key)
@@ -372,38 +400,20 @@ final class TelexComposer {
             return text
         }
         let shapeNow = !useVni && Self.immediateShapeKey(raw)
-        if smartEnglish && !useVni && !literal && !Self.preferVietnamesePrefix(raw) {
-            if foreignWord || Self.foreignStart(raw) {
-                foreignWord=true
-                englishCandidate=false
-                telexShaped=false
-                text=raw
-                return text
-            }
-            // A valid Vietnamese syllable wins after the user explicitly
-            // enters a Telex shaping key, even if English has the same spelling.
-            if !shapeNow && !toneNow &&
-               (!telexShaped ||
-                (Self.english.contains(raw.lowercased()) &&
-                 (preferEnglishExact || !Self.looksVietnamese(text)))) &&
-               Self.isEnglishPrefix(raw) {
-                englishCandidate=true
-                telexShaped=false
-                text=raw
-                return text
-            }
+        switch classifyPrefix(shapeNow:shapeNow,toneNow:toneNow) {
+        case .preserveForeign:
+            foreignWord=true;englishCandidate=false;telexShaped=false
+            text=raw;return text
+        case .protectEnglish:
+            englishCandidate=true;telexShaped=false
+            text=raw;return text
+        case .compose:
+            applyComposition(key)
         }
-        if englishCandidate {
-            englishCandidate=false
-            let old=raw
-            text=""; literal=false
-            for c in old { core(c) }
-        } else {core(key)}
         lastTelexKey=(text != prior+String(key)) && !literal
         if (shapeNow || toneNow) && raw != text {telexShaped=true}
         lastToneApplied=toneNow && raw != text
-        if smartEnglish && !useVni && !literal && !Self.preferVietnamesePrefix(raw) &&
-           raw != text && Self.impossibleVietnamese(text) {
+        if mustRecoverInvalidWord() {
             foreignWord=true
             telexShaped=false
             text=raw

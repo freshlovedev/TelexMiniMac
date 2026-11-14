@@ -157,6 +157,41 @@ namespace TelexMini
             char previous=char.ToLowerInvariant(raw[raw.Length-1]);
             return "sfrxj".IndexOf(previous)>=0;
         }
+        // Bilingual classification is deliberately separate from Telex
+        // transformations. The composer may shape immediately; the language
+        // policy may preserve only an unshaped English prefix.
+        enum PrefixAction { Compose, ProtectEnglish, PreserveForeign }
+        PrefixAction ClassifyPrefix(bool shapeNow, bool toneNow)
+        {
+            if (!SmartEnglish || UseVni || literalWord ||
+                EnglishLexicon.PreferVietnamesePrefix(rawWord))
+                return PrefixAction.Compose;
+            if (foreignWord || HasForeignStart(rawWord))
+                return PrefixAction.PreserveForeign;
+            if (!shapeNow && !toneNow &&
+                (!telexShaped || (EnglishLexicon.IsWord(rawWord) &&
+                (PreferEnglishExact || !LooksVietnamese(Text)))) &&
+                EnglishLexicon.HasPrefix(rawWord))
+                return PrefixAction.ProtectEnglish;
+            return PrefixAction.Compose;
+        }
+        bool MustRecoverInvalidWord()
+        {
+            return SmartEnglish && !UseVni && !literalWord &&
+                !EnglishLexicon.PreferVietnamesePrefix(rawWord) &&
+                rawWord != Text && ImpossibleVietnamese(Text);
+        }
+        void ApplyComposition(char key)
+        {
+            if (englishCandidate) {
+                englishCandidate=false;
+                string keys=rawWord;
+                Text=""; literalWord=false;
+                foreach(char c in keys) PushCore(c);
+            } else {
+                PushCore(key);
+            }
+        }
         public string Push(char key)
         {
             // A repeat can also be the start of a longer English word:
@@ -238,40 +273,23 @@ namespace TelexMini
                 return Text=rawWord;
             }
             bool shapeNow=!UseVni && ImmediateShapeKey(rawWord);
-            if (SmartEnglish && !UseVni && !literalWord && !EnglishLexicon.PreferVietnamesePrefix(rawWord)) {
-                if (foreignWord || HasForeignStart(rawWord)) {
-                    foreignWord=true;
-                    englishCandidate=false;
-                    telexShaped=false;
-                    return Text=rawWord;
-                }
-                // After an explicit Telex shape, an English dictionary match
-                // must not override a valid Vietnamese syllable (been -> bên).
-                // Unknown/invalid Vietnamese shapes can still recover to English.
-                if (!shapeNow && !toneNow &&
-                    (!telexShaped ||
-                     (EnglishLexicon.IsWord(rawWord) &&
-                      (PreferEnglishExact || !LooksVietnamese(Text)))) &&
-                    EnglishLexicon.HasPrefix(rawWord)) {
-                    englishCandidate=true;
-                    telexShaped=false;
-                    return Text=rawWord;
-                }
+            PrefixAction action=ClassifyPrefix(shapeNow,toneNow);
+            if (action==PrefixAction.PreserveForeign) {
+                foreignWord=true; englishCandidate=false;
+                telexShaped=false; return Text=rawWord;
             }
-            if (englishCandidate) {
-                englishCandidate=false;
-                string raw=rawWord;
-                Text=""; literalWord=false;
-                foreach(char c in raw) PushCore(c);
-            } else PushCore(key);
+            if (action==PrefixAction.ProtectEnglish) {
+                englishCandidate=true; telexShaped=false;
+                return Text=rawWord;
+            }
+            ApplyComposition(key);
             lastTelexKey=Text!=prior+key && !literalWord;
             if((shapeNow || toneNow) && Text!=rawWord) telexShaped=true;
             lastToneApplied=toneNow && Text!=rawWord;
             // If a transformed token cannot be a Vietnamese syllable any more,
             // undo the speculative accent immediately and keep subsequent keys
             // literal. No dictionary lookup or network request is required.
-            if (SmartEnglish && !UseVni && !literalWord && !EnglishLexicon.PreferVietnamesePrefix(rawWord) &&
-                rawWord!=Text && ImpossibleVietnamese(Text)) {
+            if (MustRecoverInvalidWord()) {
                 foreignWord=true;
                 telexShaped=false;
                 return Text=rawWord;
@@ -321,7 +339,13 @@ namespace TelexMini
             // A long token is probably a URL/identifier: pass through without deleting its prefix.
             if (Text.Length >= 64) literalWord=true;
             if (literalWord) return Text += key;
-            if (UseVni && k>='1' && k<='9' && !ImpossibleVietnamese(Text)) {
+            if (UseVni) return PushVniCore(key,k);
+            return PushTelexCore(key,k);
+        }
+        // Pure VNI composition, separate from Telex shape/tone logic.
+        string PushVniCore(char key,char k)
+        {
+            if (k>='1' && k<='9' && !ImpossibleVietnamese(Text)) {
                 if(k=='9') {
                     char[] letters=Text.ToCharArray();
                     for(int i=0;i<letters.Length;i++) if(char.ToLowerInvariant(letters[i])=='d') {
@@ -353,7 +377,10 @@ namespace TelexMini
                     return Text=Text+key;
                 }
             }
-            if (UseVni) return Text=Normalize(Text+key);
+            return Text=Normalize(Text+key);
+        }
+        string PushTelexCore(char key,char k)
+        {
             int tone = "zsfrxj".IndexOf(k); // z=0,s=1,f=2,r=3,x=4,j=5
             if (tone >= 0 && Vowels(Text).Count > 0)
             {

@@ -43,13 +43,20 @@ namespace TelexMini
         internal static INPUT Key(ushort key, ushort scan, uint flags) {
             return new INPUT { Type=1, Data=new UNION { Keyboard=new KEYINPUT { Key=key, Scan=scan, Flags=flags, Extra=Marker } } };
         }
-        internal static bool Replace(int erase, string insert, ushort followingKey=0)
+        // If Windows refuses ALL synthesized events, the hook must let the
+        // user's original physical key through instead of silently losing it.
+        // A partially accepted SendInput batch cannot safely be replayed.
+        internal static bool Replace(int erase, string insert, out bool canForward,
+                                     ushort followingKey=0)
         {
             var inputs = new INPUT[(erase + insert.Length) * 2 + (followingKey==0 ? 0 : 2)]; int p=0;
             for (int i=0; i<erase; i++) { inputs[p++]=Key(8,0,0); inputs[p++]=Key(8,0,2); }
             foreach (char c in insert) { inputs[p++]=Key(0,c,4); inputs[p++]=Key(0,c,6); }
             if(followingKey!=0) { inputs[p++]=Key(followingKey,0,0); inputs[p++]=Key(followingKey,0,2); }
-            return inputs.Length == 0 || SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;
+            if(inputs.Length==0) {canForward=false;return true;}
+            uint count=SendInput((uint)inputs.Length,inputs,Marshal.SizeOf(typeof(INPUT)));
+            canForward=count==0;
+            return count==(uint)inputs.Length;
         }
     }
     internal sealed class Keyboard : IDisposable
@@ -145,11 +152,12 @@ namespace TelexMini
                 if (!(Down(0x10) ^ ((Native.GetKeyState(0x14)&1)!=0))) c=char.ToLowerInvariant(c);
                 string before=engine.Text, after=engine.Push(c);
                 if (after==before+c) return Native.CallNextHookEx(keyHook,code,message,data);
-                int same=0;
-                while (same<before.Length && same<after.Length && before[same]==after[same]) same++;
-                if (!Native.Replace(before.Length-same,after.Substring(same)))
-                {
-                    engine.Reset(); if (InjectionFailed!=null) InjectionFailed();
+                TextEditPlan edit=TextEditPlan.Between(before,after);
+                bool canForward;
+                if (!Native.Replace(edit.Erase,edit.Insert,out canForward)) {
+                    engine.Reset();
+                    if (InjectionFailed!=null) InjectionFailed();
+                    if(canForward) return Native.CallNextHookEx(keyHook,code,message,data);
                 }
                 return new IntPtr(1);
             }
@@ -157,8 +165,13 @@ namespace TelexMini
                 string before=engine.Text, after=engine.Finish(RestoreInvalid);
                 engine.Reset();
                 if(before!=after) {
-                    int same=0; while(same<before.Length && same<after.Length && before[same]==after[same]) same++;
-                    if(!Native.Replace(before.Length-same,after.Substring(same),(ushort)vk) && InjectionFailed!=null) InjectionFailed();
+                    TextEditPlan edit=TextEditPlan.Between(before,after);
+                    bool canForward;
+                    if(!Native.Replace(edit.Erase,edit.Insert,out canForward,(ushort)vk)) {
+                        engine.Reset();
+                        if(InjectionFailed!=null) InjectionFailed();
+                        if(canForward) return Native.CallNextHookEx(keyHook,code,message,data);
+                    }
                     return new IntPtr(1);
                 }
             }

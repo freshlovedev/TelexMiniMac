@@ -3,6 +3,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD="$ROOT/build"
 mkdir -p "$BUILD"
+# Release guard: execute all compositional and Unicode-oracle tests BEFORE
+# replacing any signed app bundle. A failing test preserves the last build.
+swiftc -swift-version 5 "$ROOT/Sources/TelexComposer.swift" "$ROOT/Tests/EngineTests.swift" -o "$BUILD/telexmini-engine-tests"
+(cd "$(dirname "$ROOT")" && "$BUILD/telexmini-engine-tests")
 rm -rf "$BUILD/TelexMini.app" "$BUILD/TelexMini Settings.app" "$BUILD/TelexMini.iconset"
 INPUT="$BUILD/TelexMini.app"
 SETTINGS="$BUILD/TelexMini Settings.app"
@@ -34,8 +38,6 @@ codesign --force --sign - --timestamp=none "$SETTINGS"
 plutil -lint "$INPUT/Contents/Info.plist" "$SETTINGS/Contents/Info.plist"
 codesign --verify --deep --strict "$INPUT"
 codesign --verify --deep --strict "$SETTINGS"
-swiftc -swift-version 5 "$ROOT/Sources/TelexComposer.swift" "$ROOT/Tests/EngineTests.swift" -o "$BUILD/telexmini-engine-tests"
-(cd "$(dirname "$ROOT")" && "$BUILD/telexmini-engine-tests")
 echo "BUILT INPUT: $INPUT"
 echo "BUILT SETTINGS: $SETTINGS"
 echo "NOTE: For manual test install input .app under ~/Library/Input Methods then enable via System Settings."

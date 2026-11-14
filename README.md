@@ -166,6 +166,20 @@ Both platforms support Telex (default) and optional VNI (1-5 tone, 6/7/8 vowel s
 
 Regression coverage now includes 3,000 deterministic random compositions per platform, VNI numeric identifiers, Telex immediate accents, repeated escape keys and Backspace. **This does not establish application-level compatibility.** See [QA-RESULTS.md](QA-RESULTS.md) for tested behavior and outstanding Windows-focus / macOS-input-registration blockers.
 
+## Stability audit — Phase 1 (2026-11-14)
+
+The core now separates bilingual classification from native Telex/VNI editing on
+both platforms. A **4,700-row shared Unicode oracle** tests known results
+independently of the composition logic (two identical corpus copies, for Mac
+and standalone Windows builds). The Windows input hook shares a tested
+`TextEditPlan` for computing Unicode tail replacements; it also fails open
+when Windows rejects the entire synthetic-input batch. Both native build
+scripts must pass their tests **before** replacing an executable.
+
+See [PHASE1-REPORT.md](PHASE1-REPORT.md) for actual test totals, the Windows
+foreground integration blocker and the macOS input-registration blocker.
+These issues prevent claiming the app is end-to-end release-certified.
+
 ## Roadmap and release
 
 See [windows/COMMERCIAL-ROADMAP.md](windows/COMMERCIAL-ROADMAP.md) for hardening and commercial-release gates. Separate app signing, notarization, end-to-end IME tests, updates, support and licensing are **not** shipped here.

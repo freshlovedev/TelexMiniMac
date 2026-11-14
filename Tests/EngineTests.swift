@@ -36,6 +36,32 @@ import Foundation
                      "parameter","parameters","parameterized","parameterization",
                      "parametric","parametrize","params","parentheses","parallel","parser"]
         var failed=0, passed=0
+        // Independent oracle: literal Unicode reference rows, not values
+        // calculated by TelexComposer itself. The same TSV drives C# tests.
+        let corpusPaths=[
+            URL(fileURLWithPath:FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("TelexMiniMac/Tests/telex-corpus.tsv"),
+            URL(fileURLWithPath:FileManager.default.currentDirectoryPath)
+                .appendingPathComponent("Tests/telex-corpus.tsv")
+        ]
+        if let path=corpusPaths.first(where:{FileManager.default.fileExists(atPath:$0.path)}),
+           let corpus=try? String(contentsOf:path,encoding:.utf8) {
+            var checks=0
+            for line in corpus.split(whereSeparator:\.isNewline) {
+                if line.first=="#" || line.hasPrefix("raw\t") {continue}
+                let cells=line.split(separator:"\t",omittingEmptySubsequences:false)
+                guard cells.count==3 else {failed+=1;continue}
+                let keys=String(cells[0]),expected=String(cells[1])
+                let e=TelexComposer();e.smartEnglish=false
+                e.useVni=String(cells[2])=="vni"
+                for char in keys {_ = e.push(char)}
+                if e.text==expected && e.finish()==expected {passed+=1}
+                else {failed+=1;print("FAIL oracle \(keys) => \(e.text) / \(e.finish()), expected \(expected)")}
+                checks+=1
+            }
+            print("Independent Telex/VNI Unicode oracle: \(checks) cases")
+            if checks<4500 {failed+=1}
+        } else {failed+=1;print("FAIL missing shared Telex oracle")}
         for (raw,want) in vietnamese {
             let e=TelexComposer();e.smartEnglish=true;e.restoreInvalid=true
             for c in raw { _=e.push(c) }
@@ -142,6 +168,29 @@ import Foundation
                     failed+=1;print("FAIL tone placement \(before) => \(first.text), after \(after) => \(wanted)")
                 }
             }
+        }
+        // Simulated IMK marked-composition client: no live user input, and
+        // each boundary commits the preceding marked syllable exactly once.
+        for (input,expected) in [
+            ("kieeru nhieefu vaajy","kiểu nhiều vậy"),
+            ("xuosong chajy as","xuống chạy á"),
+            ("ass exe eex","as exe ễ"),
+            ("offfice parameter","office parameter"),
+            ("boons beens","bốn bến"),
+            ("nguowfi tuyeern","người tuyển")
+        ] {
+            let e=TelexComposer();var committed="";var marked=""
+            for key in input {
+                if key==" " {
+                    committed+=e.finish()+" "; e.reset();marked=""
+                } else {
+                    marked=e.push(key)
+                    if marked != e.text {failed+=1}
+                }
+            }
+            committed+=e.finish()
+            if committed==expected {passed+=1}
+            else {failed+=1;print("FAIL mock IMK multiword \(input) => \(committed), expected \(expected)")}
         }
         // Accent keys must be applied immediately, even if an English word
         // such as "book" shares the same prefix. An exact English word can

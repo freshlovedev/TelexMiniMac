@@ -51,11 +51,68 @@ namespace TelexMini
         [STAThread] static int Main(string[] args)
         {
             Console.OutputEncoding=System.Text.Encoding.UTF8;
+            string oracle=Path.Combine(Environment.CurrentDirectory,"telex-corpus.tsv");
+            if(!File.Exists(oracle)) {
+                failures++;Console.WriteLine("FAIL missing shared Telex oracle: "+oracle);
+            } else {
+                int checkedRows=0;
+                foreach(string line in File.ReadAllLines(oracle,System.Text.Encoding.UTF8)) {
+                    if(line.StartsWith("#") || line.StartsWith("raw\t") || line.Length==0) continue;
+                    string[] columns=line.Split('\t');
+                    if(columns.Length!=3) {failures++;continue;}
+                    var engine=new TelexEngine {SmartEnglish=false,
+                        UseVni=columns[2]=="vni"};
+                    // Exercise the SAME prefix/tail edit plan as the live
+                    // Windows hook against an isolated scratch text field.
+                    string field="prefix ";
+                    foreach(char c in columns[0]) {
+                        string before=engine.Text, after=engine.Push(c);
+                        TextEditPlan plan=TextEditPlan.Between(before,after);
+                        field=plan.Apply(field);
+                        if(field!="prefix "+after) {
+                            failures++;Console.WriteLine("FAIL edit-plan oracle "+columns[0]);
+                            break;
+                        }
+                    }
+                    string finished=engine.Finish(true);
+                    field=TextEditPlan.Between(engine.Text,finished).Apply(field);
+                    if(field!="prefix "+finished) {
+                        failures++;Console.WriteLine("FAIL edit-plan boundary "+columns[0]);
+                    }
+                    if(engine.Text!=columns[1] || finished!=columns[1]) {
+                        failures++;Console.WriteLine("FAIL oracle "+columns[0]+" => "+
+                            engine.Text+" / "+engine.Finish(true)+" (expected "+columns[1]+")");
+                    }
+                    checkedRows++;
+                }
+                if(checkedRows<4500) failures++;
+                Console.WriteLine("Independent Telex/VNI Unicode oracle: "+checkedRows+" cases");
+            }
             for(int i=0;i<Cases.GetLength(0);i++) {
                 var engine=new TelexEngine(); foreach(char c in Cases[i,0]) engine.Push(c);
                 Equal(Cases[i,0],Cases[i,1],engine.Text);
                 Equal("Finish "+Cases[i,0],Cases[i,0]=="asdf" ? "asdf" : Cases[i,1],engine.Finish(true));
             }
+            // Test replacement, suffix deletion, append, literal escape and
+            // boundary restoration without interacting with user documents.
+            foreach(var row in new[] {
+                new[]{"","á"},new[]{"abc","áb"},new[]{"tiếng","tiến"},
+                new[]{"kiể","kiểu"},new[]{"bô","book"},new[]{"á","as"}
+            }) {
+                var editPlan=TextEditPlan.Between(row[0],row[1]);
+                Equal("Edit plan "+row[0]+" => "+row[1],
+                    "prefix "+row[1],editPlan.Apply("prefix "+row[0]));
+            }
+            // Simulated document input tests exercise typing, replacement,
+            // Backspace, whitespace commits, and adjacent words together.
+            ReplayScenario("kieeru nhieefu vaajy","kiểu nhiều vậy");
+            ReplayScenario("xuosong chajy as","xuống chạy á");
+            ReplayScenario("ass exe eex","as exe ễ");
+            ReplayScenario("offfice parameter","office parameter");
+            ReplayScenario("tieengs\bg","tiếng");
+            ReplayScenario("boons beens","bốn bến");
+            ReplayScenario("nguowfi tuyeern","người tuyển");
+            ReplayScenario("kieeru\b u","kiể u");
             foreach(string word in new[] { "escape", "hello", "browser", "github", "script" }) {
                 var english=new TelexEngine(); foreach(char c in word) english.Push(c);
                 Equal("Restore English "+word,word,english.Finish(true));
@@ -325,6 +382,26 @@ namespace TelexMini
                 finally { ActivateKeyboardLayout(previous,0); }
             }
             Console.WriteLine("Failures: "+failures); return failures==0 ? 0 : 1;
+        }
+        static void ReplayScenario(string keys,string expected)
+        {
+            var engine=new TelexEngine {SmartEnglish=true};
+            string document="prefix ";
+            foreach(char c in keys) {
+                if(c==' ' || c=='\n') {
+                    string final=engine.Finish(true);
+                    document=TextEditPlan.Between(engine.Text,final).Apply(document);
+                    document+=c;engine.Reset();
+                } else if(c=='\b') {
+                    engine.Backspace();
+                    if(document.Length>0) document=document.Substring(0,document.Length-1);
+                } else {
+                    string before=engine.Text,after=engine.Push(c);
+                    document=TextEditPlan.Between(before,after).Apply(document);
+                }
+            }
+            document=TextEditPlan.Between(engine.Text,engine.Finish(true)).Apply(document);
+            Equal("Scratch document scenario "+keys,"prefix "+expected,document);
         }
         static void TestSettingsLayoutAndDictionary()
         {

@@ -3,7 +3,7 @@
 ## Build status
 - Native ARM64 input method built with Swift / InputMethodKit.
 - Native SwiftUI settings app built and launched.
-- Telex composer: 3,324 automated checks passed, including 3,000 deterministic stress runs, Telex/VNI, English protection and Telex tone examples.
+- Phase 1 composer (2026-11-14): **8,137 automated checks passed**, including the new **4,700-row Telex/VNI Unicode oracle**, 3,000 deterministic stress runs, word boundaries and English protections. Tests run before each native build.
 - Bundle metadata passed `plutil`; both local bundles passed ad-hoc codesign verification.
 - Input method locally installed under `~/Library/Input Methods/TelexMini.app`.
 - `TISRegisterInputSource` returned 0 (success) on 2026-11-11, but TIS source enumeration remained at 0 for TelexMini. The current login session **did not expose a usable input source**; no claim of integration success is made.
