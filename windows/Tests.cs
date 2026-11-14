@@ -113,6 +113,41 @@ namespace TelexMini
             ReplayScenario("boons beens","bốn bến");
             ReplayScenario("nguowfi tuyeern","người tuyển");
             ReplayScenario("kieeru\b u","kiể u");
+            var snippets=Productivity.ReadSnippetsFromText("dc\tđược\nko\tkhông\n");
+            Equal("Snippet explicit enabled","được",Productivity.Expand("dc",snippets,true));
+            Equal("Snippet case insensitive","không",Productivity.Expand("KO",snippets,true));
+            Equal("Snippet disabled",null,Productivity.Expand("dc",snippets,false));
+            Equal("Snippet unknown",null,Productivity.Expand("nope",snippets,true));
+            var dynamic=Productivity.ReadSnippetsFromText("today\t{date}\nclock\t{time}");
+            Equal("Date snippet macro",DateTime.Now.ToString("yyyy-MM-dd"),
+                Productivity.Expand("today",dynamic,true));
+            Equal("Time snippet macro format","True",
+                System.Text.RegularExpressions.Regex.IsMatch(
+                    Productivity.Expand("clock",dynamic,true),@"^\d{2}:\d{2}$").ToString());
+            Equal("Snippet bad format rejected","True",
+                ThrowsFormat(delegate {Productivity.ReadSnippetsFromText("d\tđược");}).ToString());
+            Equal("Snippet unsupported punctuation rejected","True",
+                ThrowsFormat(delegate {Productivity.ReadSnippetsFromText("@@\temail");}).ToString());
+            string profilesText=Productivity.ValidateProfiles("code.exe\tEnglish\nchrome.exe\tBalanced\nword.exe\tVietnamese");
+            Equal("Application profile English","English",Productivity.GetProfile("code.exe",profilesText));
+            Equal("Application profile Vietnamese","Vietnamese",Productivity.GetProfile("WORD",profilesText));
+            Equal("Application profile default","Default",Productivity.GetProfile("notepad.exe",profilesText));
+            Equal("Profile substring not matched","Default",Productivity.GetProfile("mycode.exe",profilesText));
+            Equal("Bad profile rejected","True",
+                ThrowsFormat(delegate {Productivity.ValidateProfiles("code.exe\tUnknown");}).ToString());
+            Equal("Unicode quick symbols","True",Array.Exists(Productivity.Symbols,s=>s=="₫").ToString());
+            Equal("Spell suggestions typo","True",Array.Exists(SpellAdvisor.Suggest("kiễu"),s=>s=="kiểu").ToString());
+            Equal("Spell suggestions no auto-replacement","0",SpellAdvisor.Suggest("").Length.ToString());
+            var sync=ConfigSync.Parse("TelexMini-Sync\t1\nInputMethod\tVNI\nLanguagePriority\tEnglish\nUnknown\thack\nSmartEnglish\tinvalid\n");
+            Equal("Cross-platform sync input mode","VNI",sync["InputMethod"]);
+            Equal("Cross-platform sync priority","English",sync["LanguagePriority"]);
+            Equal("Cross-platform sync unknown rejected","False",sync.ContainsKey("Unknown").ToString());
+            Equal("Cross-platform sync invalid rejected","False",sync.ContainsKey("SmartEnglish").ToString());
+            Equal("Portable default uses LocalAppData","False",AppStorage.IsPortable.ToString());
+            Equal("Portable data path",Path.Combine("C:\\Demo","Data"),
+                AppStorage.ResolveDirectory("C:\\Demo","C:\\Users\\Test",true));
+            Equal("Installed data path",Path.Combine("C:\\Users\\Test","TelexMini"),
+                AppStorage.ResolveDirectory("C:\\Demo","C:\\Users\\Test",false));
             foreach(string word in new[] { "escape", "hello", "browser", "github", "script" }) {
                 var english=new TelexEngine(); foreach(char c in word) english.Push(c);
                 Equal("Restore English "+word,word,english.Finish(true));
@@ -371,6 +406,7 @@ namespace TelexMini
             foreach(char c in "as") edit.Push(c);
             Equal("Deleting whole word restores Telex","á",edit.Text);
             TestSettingsLayoutAndDictionary();
+            TestProductivityUi();
             Console.WriteLine("INPUT struct size: "+Marshal.SizeOf(typeof(Native.INPUT)));
             if(Marshal.SizeOf(typeof(Native.INPUT))!=(IntPtr.Size==8 ? 40 : 28)) failures++;
             if(args.Length>0 && args[0]=="--integration") {
@@ -382,6 +418,9 @@ namespace TelexMini
                 finally { ActivateKeyboardLayout(previous,0); }
             }
             Console.WriteLine("Failures: "+failures); return failures==0 ? 0 : 1;
+        }
+        static bool ThrowsFormat(Action f) {
+            try {f();return false;} catch(FormatException) {return true;}
         }
         static void ReplayScenario(string keys,string expected)
         {
@@ -469,6 +508,28 @@ namespace TelexMini
             }
         }
 
+        static void TestProductivityUi()
+        {
+            var ctor=typeof(ProductivitySettings).GetConstructor(
+                BindingFlags.Instance|BindingFlags.NonPublic,null,Type.EmptyTypes,null);
+            Equal("Productivity settings constructor","True",(ctor!=null).ToString());
+            if(ctor!=null) using(var dialog=(Form)ctor.Invoke(new object[0])) {
+                var boxes=new List<TextBox>();
+                var buttons=new List<Button>();
+                var lists=new List<ListBox>();
+                CollectControls(dialog,boxes,buttons,lists);
+                Equal("Productivity inline editors","True",(boxes.Count>=3).ToString());
+                Equal("Productivity save control","True",
+                    buttons.Exists(b=>b.Text=="Lưu và áp dụng").ToString());
+            }
+            using(var picker=new SymbolPicker()) {
+                var boxes=new List<TextBox>();
+                var buttons=new List<Button>();
+                var lists=new List<ListBox>();
+                CollectControls(picker,boxes,buttons,lists);
+                Equal("Symbol picker offers 20+ symbols","True",(buttons.Count>=20).ToString());
+            }
+        }
         static void CollectControls(Control root,List<TextBox> textboxes,List<Button> buttons,List<ListBox> lists)
         {
             foreach(Control c in root.Controls) {

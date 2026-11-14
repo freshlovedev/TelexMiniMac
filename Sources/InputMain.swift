@@ -8,14 +8,40 @@ final class TelexInputController: IMKInputController {
     private var isComposing=false
     private var vietnameseEnabled=true
     private var shortcut="Ctrl + Shift + Space"
+    private var snippetRules=[String:String]()
+    private var profileRules=[String:String]()
+    private var productivityLastChecked=Date.distantPast
+    private var productivitySignature=""
+    private var snippetsEnabled=false
+    private var profilesEnabled=false
+    private var profileMode="Default"
     private var lastReloadCheck=Date.distantPast
     private var lastReloadModification=Date.distantPast
 
     private func preferences() {
         let defaults=UserDefaults(suiteName:"com.telexmini.mac") ?? .standard
-        let language=defaults.string(forKey:"languagePriority") ?? "Balanced"
-        composer.smartEnglish=(defaults.object(forKey:"smartEnglish") as? Bool ?? true) &&
-            language != "Vietnamese"
+        snippetsEnabled=defaults.bool(forKey:"snippetsEnabled")
+        profilesEnabled=defaults.bool(forKey:"profilesEnabled")
+        if Date().timeIntervalSince(productivityLastChecked)>2 {
+            productivityLastChecked=Date()
+            let paths=["snippets.tsv","profiles.tsv"].map {ProductivityCore.folder.appendingPathComponent($0)}
+            let signature=paths.map {String((try? $0.resourceValues(forKeys:[.contentModificationDateKey])
+                .contentModificationDate?.timeIntervalSince1970) ?? 0)}.joined(separator:"|")
+            if signature != productivitySignature {
+                productivitySignature=signature
+                snippetRules=ProductivityCore.validateSnippets(ProductivityCore.read("snippets.tsv")) ?? [:]
+                profileRules=ProductivityCore.validateProfiles(ProductivityCore.read("profiles.tsv")) ?? [:]
+            }
+        }
+        var language=defaults.string(forKey:"languagePriority") ?? "Balanced"
+        profileMode="Default"
+        if profilesEnabled {
+            let app=NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            profileMode=ProductivityCore.profile(for:app,rules:profileRules)
+            if profileMode != "Default" {language=profileMode}
+        }
+        composer.smartEnglish=((defaults.object(forKey:"smartEnglish") as? Bool ?? true) ||
+            language == "English") && language != "Vietnamese"
         composer.preferEnglishExact=language == "English"
         composer.restoreInvalid=defaults.object(forKey:"restoreInvalid") as? Bool ?? true
         composer.useVni=defaults.string(forKey:"inputMethod")=="VNI"
@@ -45,7 +71,9 @@ final class TelexInputController: IMKInputController {
     }
     private func finish(_ sender: Any?) {
         if isComposing {
-            clientText(sender)?.insertText(composer.finish(),replacementRange:notFound)
+            let final=composer.finish()
+            let expanded=ProductivityCore.expand(composer.raw,rules:snippetRules,enabled:snippetsEnabled)
+            clientText(sender)?.insertText(expanded ?? final,replacementRange:notFound)
         }
         composer.reset()
         isComposing=false
@@ -68,7 +96,7 @@ final class TelexInputController: IMKInputController {
         if toggle {
             finish(sender);vietnameseEnabled.toggle();return true
         }
-        if !vietnameseEnabled {return false}
+        if !vietnameseEnabled || profileMode=="English" {finish(sender);return false}
         // Secure fields are normally handled by the system's Roman input source.
         // Never inspect the receiving application's existing text.
         if event.modifierFlags.intersection([.command,.control,.option]).isEmpty == false {

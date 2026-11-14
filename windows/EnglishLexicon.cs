@@ -23,8 +23,7 @@ namespace TelexMini
         // Program Files. Legacy portable dictionaries beside the EXE are read
         // first for backward compatibility; all new edits go to LocalAppData.
         internal static string DirectoryPath {
-            get { return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TelexMini"); }
+            get { return AppStorage.DirectoryPath; }
         }
         internal static string EnglishPath { get { return Path.Combine(DirectoryPath, "EnglishWords.txt"); } }
         internal static string VietnamesePath { get { return Path.Combine(DirectoryPath, "VietnameseOverrides.txt"); } }

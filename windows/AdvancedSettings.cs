@@ -12,9 +12,9 @@ namespace TelexMini
     internal sealed class AdvancedSettings : Form
     {
         const string RunKey=@"Software\Microsoft\Windows\CurrentVersion\Run";
-        readonly ComboBox method,shortcut,priority;
+        readonly ComboBox method,shortcut,priority,uiLanguageCombo;
         readonly TextBox excluded;
-        readonly CheckBox start;
+        readonly CheckBox start,portable;
         readonly Label hint;
         internal static bool Open(IWin32Window owner) {
             using(var form=new AdvancedSettings()) return form.ShowDialog(owner)==DialogResult.OK;
@@ -35,14 +35,14 @@ namespace TelexMini
         AdvancedSettings() {
             Text="TelexMini — Cài đặt nâng cao";
             StartPosition=FormStartPosition.CenterParent;
-            ClientSize=new Size(610,510);MinimumSize=new Size(560,490);
+            ClientSize=new Size(610,555);MinimumSize=new Size(560,520);
             BackColor=Color.FromArgb(17,28,44);ForeColor=Color.White;
             Font=new Font("Segoe UI",10);AutoScaleMode=AutoScaleMode.Dpi;
             var panel=new TableLayoutPanel {
-                Dock=DockStyle.Fill,Padding=new Padding(20),ColumnCount=1,RowCount=9,AutoScroll=true
+                Dock=DockStyle.Fill,Padding=new Padding(20),ColumnCount=1,RowCount=10,AutoScroll=true
             };
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            for(int i=0;i<9;i++) panel.RowStyles.Add(new RowStyle(SizeType.Absolute,i==6?70:i==8?62:41));
+            for(int i=0;i<10;i++) panel.RowStyles.Add(new RowStyle(SizeType.Absolute,i==7?70:i==9?62:41));
             Controls.Add(panel);
             panel.Controls.Add(new Label {Text="CÀI ĐẶT GÕ SONG NGỮ",Font=new Font("Segoe UI",17,FontStyle.Bold),
                 Dock=DockStyle.Fill,ForeColor=Color.FromArgb(81,229,183)},0,0);
@@ -66,19 +66,31 @@ namespace TelexMini
             shortcut=new ComboBox {Dock=DockStyle.Fill,DropDownStyle=ComboBoxStyle.DropDownList};
             shortcut.Items.AddRange(new object[]{"Ctrl + Shift + Space","Ctrl + Alt + V","Alt + Shift + V"});
             shortcut.SelectedIndex=Math.Max(0,shortcut.Items.IndexOf(UserPreferences.String("Hotkey","Ctrl + Shift + Space")));
-            panel.Controls.Add(shortcut,0,4);
+            uiLanguageCombo=new ComboBox {DropDownStyle=ComboBoxStyle.DropDownList,Width=140};
+            uiLanguageCombo.Items.AddRange(new object[]{"Tiếng Việt","English"});
+            uiLanguageCombo.SelectedIndex=UserPreferences.String("UILanguage","vi")=="en"?1:0;
+            var shortcutLine=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};
+            shortcut.Dock=DockStyle.None;shortcut.Width=185;
+            shortcutLine.Controls.Add(shortcut);
+            shortcutLine.Controls.Add(new Label {Text="Giao diện",AutoSize=true,
+                ForeColor=Color.White,Margin=new Padding(12,6,4,0)});
+            shortcutLine.Controls.Add(uiLanguageCombo);
+            panel.Controls.Add(shortcutLine,0,4);
             start=new CheckBox {Text="Tự khởi động cùng Windows",Checked=AutoStart,
                 Dock=DockStyle.Fill,ForeColor=Color.White};
             panel.Controls.Add(start,0,5);
+            portable=new CheckBox {Text="Portable Mode (dữ liệu cạnh EXE, cần khởi động lại)",
+                Checked=AppStorage.IsPortable,Dock=DockStyle.Fill,ForeColor=Color.White};
+            panel.Controls.Add(portable,0,6);
             var excludedPanel=new FlowLayoutPanel {Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false};
             excludedPanel.Controls.Add(new Label {Text="Ứng dụng bỏ qua (tên tiến trình, cách nhau bằng dấu phẩy)",
                 AutoSize=true,ForeColor=Color.White});
             excluded=new TextBox {Width=520,Text=UserPreferences.String("ExcludedApps","")};
             excludedPanel.Controls.Add(excluded);
-            panel.Controls.Add(excludedPanel,0,6);
+            panel.Controls.Add(excludedPanel,0,7);
             hint=new Label {Dock=DockStyle.Fill,ForeColor=Color.FromArgb(159,189,205),
                 Text="Cấu hình và từ điển lưu trên máy, không ghi lịch sử gõ."};
-            panel.Controls.Add(hint,0,7);
+            panel.Controls.Add(hint,0,8);
             var actions=new FlowLayoutPanel {Dock=DockStyle.Fill,FlowDirection=FlowDirection.RightToLeft};
             var save=new Button {Text="Lưu và áp dụng",Width=135,Height=34};
             var cancel=new Button {Text="Hủy",Width=70,Height=34};
@@ -86,16 +98,23 @@ namespace TelexMini
             var import=new Button {Text="Nhập",Width=75,Height=34};
             actions.Controls.Add(save);actions.Controls.Add(cancel);
             actions.Controls.Add(export);actions.Controls.Add(import);
-            panel.Controls.Add(actions,0,8);
+            panel.Controls.Add(actions,0,9);
             cancel.Click+=delegate {Close();};
             save.Click+=delegate {
                 try {
                     AutoStart=start.Checked;
+                    if(portable.Checked!=AppStorage.IsPortable) {
+                        if(portable.Checked) AppStorage.EnablePortable();
+                        else AppStorage.DisablePortable();
+                        MessageBox.Show(this,"Đã chuyển nơi lưu cấu hình. Hãy thoát và mở lại TelexMini.",
+                            "TelexMini",MessageBoxButtons.OK,MessageBoxIcon.Information);
+                    }
                     UserPreferences.Set("InputMethod",method.SelectedItem.ToString());
                     UserPreferences.Set("LanguagePriority",
                         priority.SelectedIndex==1?"Vietnamese":
                         priority.SelectedIndex==2?"English":"Balanced");
                     UserPreferences.Set("Hotkey",shortcut.SelectedItem.ToString());
+                    UserPreferences.Set("UILanguage",uiLanguageCombo.SelectedIndex==1?"en":"vi");
                     string names=string.Join(",",excluded.Text.Split(',')
                         .Select(s=>s.Trim()).Where(s=>s.Length>0 &&
                          s.All(c=>char.IsLetterOrDigit(c)||c=='.'||c=='_'||c=='-')).Distinct().ToArray());
@@ -111,8 +130,7 @@ namespace TelexMini
                 chooser.Description=restore?"Chọn thư mục chứa bản sao lưu":"Chọn thư mục để xuất cấu hình";
                 if(chooser.ShowDialog(this)!=DialogResult.OK) return;
                 try {
-                    string dir=Path.Combine(Environment.GetFolderPath(
-                        Environment.SpecialFolder.LocalApplicationData),"TelexMini");
+                    string dir=AppStorage.DirectoryPath;
                     Directory.CreateDirectory(dir);
                     if(Path.GetFullPath(dir).TrimEnd('\\').Equals(
                         Path.GetFullPath(chooser.SelectedPath).TrimEnd('\\'),
@@ -121,17 +139,31 @@ namespace TelexMini
                             "TelexMini",MessageBoxButtons.OK,MessageBoxIcon.Warning);
                         return;
                     }
-                    foreach(var name in new[]{"preferences.ini","EnglishWords.txt","VietnameseOverrides.txt"}) {
+                    foreach(var name in new[]{"preferences.ini","EnglishWords.txt","VietnameseOverrides.txt","snippets.tsv","profiles.tsv"}) {
                         string from=Path.Combine(restore?chooser.SelectedPath:dir,name);
                         string to=Path.Combine(restore?dir:chooser.SelectedPath,name);
-                        if(File.Exists(from)) File.Copy(from,to,true);
+                        if(!File.Exists(from)) continue;
+                        if(restore && name=="snippets.tsv")
+                            Productivity.ReadSnippetsFromText(File.ReadAllText(from,Encoding.UTF8));
+                        if(restore && name=="profiles.tsv")
+                            Productivity.ValidateProfiles(File.ReadAllText(from,Encoding.UTF8));
+                        string temp=to+".import";
+                        File.Copy(from,temp,true);
+                        try {
+                            if(File.Exists(to)) File.Replace(temp,to,null);
+                            else File.Move(temp,to);
+                        } finally {
+                            if(File.Exists(temp)) File.Delete(temp);
+                        }
                     }
                     if(restore) {
+                        ConfigSync.ReadFrom(chooser.SelectedPath);
                         UserPreferences.Reload();EnglishLexicon.Reload();
                         MessageBox.Show(this,"Đã nhập cấu hình và từ điển.",
                             "TelexMini",MessageBoxButtons.OK,MessageBoxIcon.Information);
                         DialogResult=DialogResult.OK;Close();
                     } else {
+                        ConfigSync.WriteTo(chooser.SelectedPath);
                         MessageBox.Show(this,"Đã xuất cấu hình.",
                             "TelexMini",MessageBoxButtons.OK,MessageBoxIcon.Information);
                     }

@@ -1,5 +1,23 @@
 # TelexMini — macOS Preview
 
+## Phases 2–4 preview (2026-11-14)
+
+The macOS Settings app now offers user-enabled snippet expansion, per-app
+bundle-ID profiles, a manual symbol picker, an explicit on-demand local
+spelling suggestion control, and manual configuration transfer compatible
+with Windows via `telexmini-sync.tsv`. The local `snippets.tsv` file
+supports `{date}` and `{time}` macros. Snippet and app-profile features
+default OFF. They do not upload typed text or modify other apps without an
+explicit user choice.
+
+The **Check releases** control opens GitHub; it is not an unattended
+updater. Use `bash tools/package-preview.sh` to build an ad-hoc signed
+preview ZIP plus SHA-256 checksum. The zip cannot substitute for Apple
+Developer ID signing/notarization. The app still requires input-source
+activation in macOS before end-to-end typing can be tested.
+
+See `PHASES-2-4-REPORT.md` for verification, blockers and feature scope.
+
 ## Build status
 - Native ARM64 input method built with Swift / InputMethodKit.
 - Native SwiftUI settings app built and launched.

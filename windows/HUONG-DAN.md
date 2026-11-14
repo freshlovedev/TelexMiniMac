@@ -2,6 +2,32 @@
 
 Bộ gõ Telex nhỏ cho Windows, viết bằng C# / Windows Forms. Chạy trực tiếp `TelexMini.exe`, không cần trình cài đặt. Dùng .NET Framework 4.x có sẵn trên Windows 10/11 thông thường.
 
+## Năng suất: Đợt 2–4
+
+Mở menu khay TelexMini:
+
+- **Gõ tắt & ứng dụng...**: mặc định TẮT. Bật gõ tắt để thay chuỗi
+  phím Latin khi gõ khoảng trắng/Enter/Tab; mỗi dòng theo định dạng
+  `dc<Tab>được`, `ko<Tab>không`. Dùng `{date}` và `{time}` trong
+  nội dung thay thế để chèn ngày giờ hiện tại. Tối đa 256 quy tắc.
+- **Profiles**: mỗi dòng `code.exe<Tab>English`,
+  `chrome.exe<Tab>Balanced`, `WINWORD.EXE<Tab>Vietnamese`. Chọn bật
+  profile riêng; không ép chế độ V khi đang E thủ công hoặc trong mật khẩu.
+- **Gợi ý chính tả**: nhập từ và bấm nút. Chỉ gợi ý từ một danh sách nhỏ,
+  không tự sửa nội dung của tài liệu đang mở.
+- **Ký tự nhanh...**: click ký tự để sao chép, rồi Ctrl+V để chèn.
+- **Cài đặt nâng cao...**: Portable Mode sao chép cấu hình vào `Data/` bên
+  cạnh EXE và cần khởi động lại. Không xóa dữ liệu gốc.
+- **Xuất/Nhập cấu hình**: gồm `telexmini-sync.tsv`, từ điển,
+  `snippets.tsv` và `profiles.tsv`. Có thể dùng chung thư mục với
+  macOS; nhớ đổi tên tiến trình Windows thành bundle ID khi dùng Mac.
+- **Kiểm tra bản cập nhật...**: chỉ mở GitHub Releases, KHÔNG tải/cài
+  phiên bản chưa ký tự động.
+
+Bộ gõ Windows vẫn có duy nhất `TelexMini.exe`. Gói preview và SHA-256
+được tạo ở `dist/` bằng `package-preview.ps1`. Xem
+`PHASES-2-4-REPORT.md` tại repo để biết phần kiểm thử chưa đạt.
+
 ## Kiểm thử Đợt 1 — Nền tảng ổn định
 
 Bản mã được phân tách rõ phần nhận diện Anh–Việt và phần xử lý phím

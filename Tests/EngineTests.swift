@@ -169,6 +169,29 @@ import Foundation
                 }
             }
         }
+        let snippetData="dc\tđược\nko\tkhông"
+        if let rules=ProductivityCore.validateSnippets(snippetData) {
+            for (raw,want) in [("dc","được"),("KO","không")] {
+                if ProductivityCore.expand(raw,rules:rules,enabled:true)==want {passed+=1}
+                else {failed+=1;print("FAIL macOS snippet \(raw)")}
+            }
+            if ProductivityCore.expand("dc",rules:rules,enabled:false)==nil {passed+=1}
+            else {failed+=1}
+        } else {failed+=1}
+        if ProductivityCore.validateSnippets("@@\temail")==nil {passed+=1} else {failed+=1}
+        if let macro=ProductivityCore.validateSnippets("today\t{date}"),
+           let expanded=ProductivityCore.expand("today",rules:macro,enabled:true),
+           expanded.count==10 && expanded.contains("-") {passed+=1}
+        else {failed+=1}
+        if let profiles=ProductivityCore.validateProfiles("com.microsoft.vscode\tEnglish\ncom.google.Chrome\tBalanced") {
+            if ProductivityCore.profile(for:"com.microsoft.vscode",rules:profiles)=="English" {passed+=1}
+            else {failed+=1}
+            if ProductivityCore.profile(for:"com.unknown.app",rules:profiles)=="Default" {passed+=1}
+            else {failed+=1}
+        } else {failed+=1}
+        if ProductivityCore.symbols.contains("₫") {passed+=1}else {failed+=1}
+        if SpellAdvisor.suggest("kiễu").contains("kiểu") {passed+=1}else {failed+=1}
+        if SpellAdvisor.suggest("").isEmpty {passed+=1}else {failed+=1}
         // Simulated IMK marked-composition client: no live user input, and
         // each boundary commits the preceding marked syllable exactly once.
         for (input,expected) in [

@@ -29,6 +29,9 @@ final class SettingsStore: ObservableObject {
     @Published var hotkey:String {didSet {defaults.set(hotkey,forKey:"hotkey")}}
     @Published var languagePriority:String {didSet {defaults.set(languagePriority,forKey:"languagePriority")}}
     @Published var excludedApps:String {didSet {defaults.set(excludedApps,forKey:"excludedApps")}}
+    @Published var snippetsEnabled:Bool {didSet {defaults.set(snippetsEnabled,forKey:"snippetsEnabled")}}
+    @Published var profilesEnabled:Bool {didSet {defaults.set(profilesEnabled,forKey:"profilesEnabled")}}
+    @Published var uiLanguage:String {didSet {defaults.set(uiLanguage,forKey:"uiLanguage")}}
     private let defaults=UserDefaults(suiteName:"com.telexmini.mac") ?? .standard
     init() {
         smartEnglish=defaults.object(forKey:"smartEnglish") as? Bool ?? true
@@ -40,6 +43,9 @@ final class SettingsStore: ObservableObject {
         hotkey=defaults.string(forKey:"hotkey") ?? "Ctrl + Shift + Space"
         languagePriority=defaults.string(forKey:"languagePriority") ?? "Balanced"
         excludedApps=defaults.string(forKey:"excludedApps") ?? ""
+        snippetsEnabled=defaults.bool(forKey:"snippetsEnabled")
+        profilesEnabled=defaults.bool(forKey:"profilesEnabled")
+        uiLanguage=defaults.string(forKey:"uiLanguage") ?? "vi"
     }
     static var directory: URL {
         let dir=FileManager.default.homeDirectoryForCurrentUser
@@ -58,19 +64,47 @@ final class SettingsStore: ObservableObject {
         panel.prompt=incoming ? "Nhập" : "Xuất"
         guard panel.runModal() == .OK,let folder=panel.url,
               folder.standardizedFileURL != Self.directory.standardizedFileURL else {return}
-        for filename in ["EnglishWords.txt","VietnameseOverrides.txt"] {
+        for filename in ["EnglishWords.txt","VietnameseOverrides.txt","snippets.tsv","profiles.tsv"] {
             let local=Self.directory.appendingPathComponent(filename)
             let backup=folder.appendingPathComponent(filename)
             let source=incoming ? backup : local
             let target=incoming ? local : backup
-            if FileManager.default.fileExists(atPath:source.path) {
-                try? FileManager.default.removeItem(at:target)
-                try? FileManager.default.copyItem(at:source,to:target)
+            if let data=try? Data(contentsOf:source) {
+                // Never remove the old preferences first: atomic replacement
+                // leaves existing files intact if reading or writing fails.
+                let content=String(data:data,encoding:.utf8) ?? ""
+                let valid=filename=="snippets.tsv" ?
+                    ProductivityCore.validateSnippets(content) != nil :
+                    filename=="profiles.tsv" ?
+                    ProductivityCore.validateProfiles(content) != nil : true
+                if valid {try? data.write(to:target,options:.atomic)}
             }
         }
+        let portable=folder.appendingPathComponent("telexmini-sync.tsv")
         let pref=folder.appendingPathComponent("TelexMini-preferences.json")
         if incoming {
-            if let data=try? Data(contentsOf:pref),
+            if let contents=try? String(contentsOf:portable,encoding:.utf8) {
+                for line in contents.split(whereSeparator:\.isNewline) {
+                    let cells=line.split(separator:"\t",omittingEmptySubsequences:false)
+                    guard cells.count==2 else {continue}
+                    let key=String(cells[0]),value=String(cells[1])
+                    if key=="InputMethod" && ["Telex","VNI"].contains(value) {inputMethod=value}
+                    if key=="LanguagePriority" && ["Balanced","Vietnamese","English"].contains(value) {
+                        languagePriority=value
+                    }
+                    if key=="UILanguage" && ["vi","en"].contains(value) {uiLanguage=value}
+                    if value=="true" || value=="false" {
+                        let enabled=value=="true"
+                        if key=="SmartEnglish" {smartEnglish=enabled}
+                        if key=="RestoreInvalid" {restoreInvalid=enabled}
+                        if key=="SnippetsEnabled" {snippetsEnabled=enabled}
+                        if key=="ProfilesEnabled" {profilesEnabled=enabled}
+                        if key=="DarkTheme" {darkMode=enabled}
+                    }
+                }
+            }
+            if !FileManager.default.fileExists(atPath:portable.path),
+               let data=try? Data(contentsOf:pref),
                let json=try? JSONSerialization.jsonObject(with:data) as? [String:String] {
                 if let value=json["inputMethod"],["Telex","VNI"].contains(value) {inputMethod=value}
                 if let value=json["hotkey"] {hotkey=value}
@@ -85,6 +119,16 @@ final class SettingsStore: ObservableObject {
             if let data=try? JSONSerialization.data(withJSONObject:json,options:[.prettyPrinted]) {
                 try? data.write(to:pref,options:.atomic)
             }
+            let rows=["TelexMini-Sync\t1","InputMethod\t"+inputMethod,
+                      "LanguagePriority\t"+languagePriority,
+                      "SmartEnglish\t"+String(smartEnglish),
+                      "RestoreInvalid\t"+String(restoreInvalid),
+                      "SnippetsEnabled\t"+String(snippetsEnabled),
+                      "ProfilesEnabled\t"+String(profilesEnabled),
+                      "DarkTheme\t"+String(darkMode),
+                      "UILanguage\t"+uiLanguage]
+            try? (rows.joined(separator:"\n")+"\n")
+                .write(to:portable,atomically:true,encoding:.utf8)
         }
         signalReload()
     }
@@ -145,7 +189,14 @@ struct SettingsView:View {
     @State private var section="dashboard"
     @State private var editingFile:String?=nil
     @State private var editingText=""
+    @State private var validationError=""
+    @State private var showSymbols=false
+    @State private var spellingInput=""
+    @State private var spellingSuggestions=[String]()
     private var wordCount:String { "1.670+" }
+    private func tr(_ vi:String,_ en:String)->String {
+        prefs.uiLanguage=="en" ? en : vi
+    }
     var body:some View {
         HStack(spacing:0) {
             sidebar
@@ -170,17 +221,17 @@ struct SettingsView:View {
                         .background(Palette.card,in:RoundedRectangle(cornerRadius:18))
                     }
                     VStack(alignment:.leading,spacing:12) {
-                        Text("CÀI ĐẶT NÂNG CAO").font(.system(size:11,weight:.bold))
+                        Text(tr("CÀI ĐẶT NÂNG CAO","ADVANCED SETTINGS")).font(.system(size:11,weight:.bold))
                             .tracking(2).foregroundStyle(Palette.muted)
                         HStack {
-                            Text("Kiểu gõ")
+                            Text(tr("Kiểu gõ","Typing method"))
                             Spacer()
                             Picker("Kiểu gõ",selection:$prefs.inputMethod) {
                                 Text("Telex").tag("Telex");Text("VNI").tag("VNI")
                             }.labelsHidden().frame(width:145)
                         }
                         HStack {
-                            Text("Ưu tiên ngôn ngữ")
+                            Text(tr("Ưu tiên ngôn ngữ","Language priority"))
                             Spacer()
                             Picker("Ưu tiên",selection:$prefs.languagePriority) {
                                 Text("Cân bằng").tag("Balanced")
@@ -189,14 +240,39 @@ struct SettingsView:View {
                             }.labelsHidden().frame(width:165)
                         }
                         HStack {
-                            Text("Phím chuyển V/E")
+                            Text(tr("Ngôn ngữ giao diện","Interface language"))
+                            Spacer()
+                            Picker("UI",selection:$prefs.uiLanguage) {
+                                Text("Tiếng Việt").tag("vi")
+                                Text("English").tag("en")
+                            }.labelsHidden().frame(width:165)
+                        }
+                        HStack {
+                            Text(tr("Phím chuyển V/E","V/E shortcut"))
                             Spacer()
                             Picker("Phím tắt",selection:$prefs.hotkey) {
                                 Text("Ctrl + Shift + Space").tag("Ctrl + Shift + Space")
                                 Text("Ctrl + Option + V").tag("Ctrl + Option + V")
                             }.labelsHidden().frame(width:235)
                         }
-                        Toggle("Tự khởi động cùng macOS",isOn:$prefs.autoStart).tint(Palette.mint)
+                        Toggle(tr("Tự khởi động cùng macOS","Start with macOS"),isOn:$prefs.autoStart).tint(Palette.mint)
+                        Toggle(tr("Gõ tắt tại ranh giới từ (tự chọn bật)","Expand snippets at word boundaries (opt-in)"),isOn:$prefs.snippetsEnabled).tint(Palette.mint)
+                        Toggle(tr("Cấu hình riêng theo ứng dụng","Per-app profiles"),isOn:$prefs.profilesEnabled).tint(Palette.mint)
+                        HStack {
+                            Button(tr("Quản lý gõ tắt","Manage snippets")) {openEditor("snippets.tsv")}
+                            Button(tr("Profile ứng dụng","Application profiles")) {openEditor("profiles.tsv")}
+                            Button(tr("Ký tự nhanh","Symbols")) {showSymbols=true}
+                        }.buttonStyle(.bordered)
+                        HStack {
+                            TextField("Nhập từ muốn xem gợi ý...",text:$spellingInput)
+                                .textFieldStyle(.roundedBorder)
+                            Button(tr("Gợi ý chính tả","Spelling suggestions")) {
+                                spellingSuggestions=SpellAdvisor.suggest(spellingInput)
+                            }
+                        }.buttonStyle(.bordered)
+                        Text(spellingSuggestions.isEmpty ? "Gợi ý offline theo yêu cầu, không tự sửa chữ." :
+                            "Gợi ý: "+spellingSuggestions.joined(separator:" · "))
+                            .font(.caption).foregroundStyle(Palette.muted)
                         if !prefs.autoStartError.isEmpty {
                             Text(prefs.autoStartError).foregroundStyle(.orange).font(.caption)
                         }
@@ -205,8 +281,12 @@ struct SettingsView:View {
                         TextField("com.apple.Terminal, com.microsoft.VSCode",text:$prefs.excludedApps)
                             .textFieldStyle(.roundedBorder)
                         HStack {
-                            Button("Xuất cấu hình") {prefs.transfer(false)}
-                            Button("Nhập cấu hình") {prefs.transfer(true)}
+                            Button(tr("Xuất cấu hình","Export settings")) {prefs.transfer(false)}
+                            Button(tr("Nhập cấu hình","Import settings")) {prefs.transfer(true)}
+                            Button(tr("Kiểm tra bản mới","Check releases")) {
+                                NSWorkspace.shared.open(URL(string:
+                                    "https://github.com/muahacodon321-boop/TelexMiniMac/releases")!)
+                            }
                         }.buttonStyle(.bordered)
                     }.padding(18).background(Palette.card,in:RoundedRectangle(cornerRadius:18))
                     VStack(alignment:.leading,spacing:9) {
@@ -233,12 +313,37 @@ struct SettingsView:View {
         }
         .frame(minWidth:930,minHeight:640)
         .preferredColorScheme(.dark)
+        .alert("Dữ liệu chưa hợp lệ",isPresented:Binding(
+            get:{!validationError.isEmpty},set:{if !$0 {validationError=""}})) {
+            Button("OK") {validationError=""}
+        } message: {Text(validationError)}
+        .sheet(isPresented:$showSymbols) {
+            VStack(alignment:.leading,spacing:14) {
+                Text("Ký tự nhanh").font(.title2.bold())
+                Text("Chọn ký tự để sao chép, sau đó Command+V để chèn.")
+                    .foregroundStyle(.secondary)
+                LazyVGrid(columns:Array(repeating:GridItem(.flexible()),count:7),spacing:8) {
+                    ForEach(ProductivityCore.symbols,id:\.self) { value in
+                        Button(value) {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(value,forType:.string)
+                            showSymbols=false
+                        }.frame(maxWidth:.infinity,minHeight:36)
+                            .buttonStyle(.bordered)
+                    }
+                }
+            }.padding(24).frame(width:500)
+        }
         .sheet(isPresented:Binding(get:{editingFile != nil},set:{if !$0 {editingFile=nil}})) {
             let file=editingFile ?? "EnglishWords.txt"
             VStack(alignment:.leading,spacing:12) {
-                Text(file=="EnglishWords.txt" ? "Từ điển tiếng Anh" : "Ưu tiên Telex")
+                Text(file=="EnglishWords.txt" ? "Từ điển tiếng Anh" :
+                     file=="VietnameseOverrides.txt" ? "Ưu tiên Telex" :
+                     file=="snippets.tsv" ? "Gõ tắt" : "Cấu hình ứng dụng")
                     .font(.title2.bold())
-                Text("Mỗi dòng một từ gồm a-z. Không ghi nhận nội dung đang gõ.")
+                Text(file=="snippets.tsv" ? "Mỗi dòng: phím tắt a-z, Tab, nội dung thay thế. Ví dụ dc<Tab>được." :
+                     file=="profiles.tsv" ? "Mỗi dòng: bundle-id<Tab>English/Vietnamese/Balanced." :
+                     "Mỗi dòng một từ gồm a-z. Không ghi nhận nội dung đang gõ.")
                     .font(.caption).foregroundStyle(.secondary)
                 TextEditor(text:$editingText).font(.system(.body,design:.monospaced))
                     .frame(minHeight:340)
@@ -247,12 +352,26 @@ struct SettingsView:View {
                     Spacer()
                     Button("Lưu") {
                         let url=SettingsStore.directory.appendingPathComponent(file)
-                        let cleaned=editingText.split(whereSeparator: \.isNewline)
-                            .map {String($0).trimmingCharacters(in:.whitespaces).lowercased()}
-                            .filter {!$0.isEmpty && $0.count<=64 &&
-                                     $0.utf8.allSatisfy({$0>=97 && $0<=122})}
-                        try? (cleaned.joined(separator:"\n")+"\n").write(to:url,
-                            atomically:true,encoding:.utf8)
+                        if file=="snippets.tsv" {
+                            guard ProductivityCore.validateSnippets(editingText) != nil else {
+                                validationError="Gõ tắt phải có phím a-z (2–48 ký tự), Tab, rồi nội dung."
+                                return
+                            }
+                            try? ProductivityCore.save(editingText,to:file)
+                        } else if file=="profiles.tsv" {
+                            guard ProductivityCore.validateProfiles(editingText) != nil else {
+                                validationError="Profile phải là bundle ID, Tab, English/Vietnamese/Balanced."
+                                return
+                            }
+                            try? ProductivityCore.save(editingText,to:file)
+                        } else {
+                            let cleaned=editingText.split(whereSeparator: \.isNewline)
+                                .map {String($0).trimmingCharacters(in:.whitespaces).lowercased()}
+                                .filter {!$0.isEmpty && $0.count<=64 &&
+                                         $0.utf8.allSatisfy({$0>=97 && $0<=122})}
+                            try? (cleaned.joined(separator:"\n")+"\n").write(to:url,
+                                atomically:true,encoding:.utf8)
+                        }
                         prefs.signalReload();editingFile=nil
                     }.keyboardShortcut(.defaultAction)
                 }
@@ -283,10 +402,10 @@ struct SettingsView:View {
             Text("WORKSPACE").font(.system(size:10,weight:.bold))
                 .tracking(1.4).foregroundStyle(Palette.muted)
             VStack(spacing:5) {
-                SidebarButton(icon:"square.grid.2x2.fill",label:"Tổng quan",action:{ section="dashboard" },selected:true)
-                SidebarButton(icon:"text.badge.plus",label:"Từ điển tiếng Anh",action:{ openEditor("EnglishWords.txt") })
-                SidebarButton(icon:"character.book.closed",label:"Ưu tiên Telex",action:{ openEditor("VietnameseOverrides.txt") })
-                SidebarButton(icon:"arrow.clockwise",label:"Nạp lại từ điển",action:{
+                SidebarButton(icon:"square.grid.2x2.fill",label:tr("Tổng quan","Overview"),action:{ section="dashboard" },selected:true)
+                SidebarButton(icon:"text.badge.plus",label:tr("Từ điển tiếng Anh","English dictionary"),action:{ openEditor("EnglishWords.txt") })
+                SidebarButton(icon:"character.book.closed",label:tr("Ưu tiên Telex","Telex overrides"),action:{ openEditor("VietnameseOverrides.txt") })
+                SidebarButton(icon:"arrow.clockwise",label:tr("Nạp lại từ điển","Reload dictionaries"),action:{
                     // Input-source process loads preferences/dictionary on its next activation.
                     prefs.signalReload()
                 })
@@ -316,9 +435,9 @@ struct SettingsView:View {
                 Text("OVERVIEW / BẢNG ĐIỀU KHIỂN")
                     .font(.system(size:10,weight:.bold)).tracking(1.8)
                     .foregroundStyle(Palette.mint)
-                Text("Gõ theo cách của bạn.")
+                Text(tr("Gõ theo cách của bạn.","Type your way."))
                     .font(.system(size:27,weight:.bold,design:.rounded))
-                Text("Hai ngôn ngữ. Một trải nghiệm liền mạch.")
+                Text(tr("Hai ngôn ngữ. Một trải nghiệm liền mạch.","Two languages, one seamless experience."))
                     .font(.system(size:13)).foregroundStyle(Palette.muted)
             }
             Spacer()

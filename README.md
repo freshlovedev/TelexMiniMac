@@ -166,6 +166,28 @@ Both platforms support Telex (default) and optional VNI (1-5 tone, 6/7/8 vowel s
 
 Regression coverage now includes 3,000 deterministic random compositions per platform, VNI numeric identifiers, Telex immediate accents, repeated escape keys and Backspace. **This does not establish application-level compatibility.** See [QA-RESULTS.md](QA-RESULTS.md) for tested behavior and outstanding Windows-focus / macOS-input-registration blockers.
 
+## Phases 2–4: offline productivity and preview packaging
+
+New opt-in features on Windows/macOS: per-app Vietnamese/English/Balanced
+profiles, `snippets.tsv` text expansions with `{date}`/`{time}` macros,
+on-demand spelling suggestions (small local list), and a Quick Symbols
+picker. Nothing sends typed words to a service, learns passwords, or silently
+rewrites text without an enabled snippet rule.
+
+Settings transfer uses `telexmini-sync.tsv` plus explicit dictionaries,
+snippets and profile files. Windows also supports an opt-in `portable.flag`
+and `Data/` directory beside its one canonical EXE. Preview packagers:
+`bash tools/package-preview.sh` on macOS and
+`powershell -File windows/package-preview.ps1` on Windows; they create
+ZIP archives and SHA-256 digest files without including private user data.
+Updates are checked only when the user opens the GitHub Releases page.
+
+**Read [PHASES-2-4-REPORT.md](PHASES-2-4-REPORT.md) before claiming release
+readiness.** These are preview builds, not Developer ID-notarized or
+Authenticode-signed commercial releases. Trusted automatic installation,
+full UI localization, robust per-window mode memory and live integration
+verification remain outstanding.
+
 ## Stability audit — Phase 1 (2026-11-14)
 
 The core now separates bilingual classification from native Telex/VNI editing on

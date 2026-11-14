@@ -1,5 +1,7 @@
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace TelexMini
@@ -15,6 +17,8 @@ namespace TelexMini
         [DllImport("user32.dll")] internal static extern short GetKeyState(int key);
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] internal static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr process);
+        [DllImport("user32.dll",EntryPoint="GetWindowThreadProcessId")]
+        internal static extern uint GetWindowThreadProcessIdWithPid(IntPtr window,out uint process);
         [DllImport("user32.dll")] internal static extern bool GetGUIThreadInfo(uint thread, ref GUIInfo info);
         [DllImport("user32.dll", SetLastError=true)] internal static extern uint SendInput(uint count, INPUT[] inputs, int size);
         [DllImport("user32.dll")] internal static extern bool RegisterHotKey(IntPtr window, int id, uint mods, uint key);
@@ -66,12 +70,35 @@ namespace TelexMini
         readonly TelexEngine engine = new TelexEngine { SmartEnglish=true };
         bool enabled=true;
         bool suspended, disposed;
+        bool baseSmartEnglish=true,basePreferEnglishExact=false;
         readonly InputContextMonitor context;
         int contextRevision=-1;
         internal bool AutoEnglish=false;
+        internal bool SnippetsEnabled=false;
+        internal bool ProfilesEnabled=false;
+        string activeProfile="Default";
+        IDictionary<string,string> snippets=Productivity.ReadSnippets();
+        internal void ReloadProductivity() {
+            snippets=Productivity.ReadSnippets();
+            activeProfile=ProfilesEnabled?Productivity.ProfileFor(ForegroundProcess(Native.GetForegroundWindow())):"Default";
+            ApplyProfile();
+        }
+        void ApplyProfile() {
+            engine.SmartEnglish=activeProfile=="Vietnamese" ? false :
+                activeProfile=="Balanced" ? true : baseSmartEnglish;
+            engine.PreferEnglishExact=activeProfile=="Balanced" ? false : basePreferEnglishExact;
+            engine.Reset();
+        }
+        static string ForegroundProcess(IntPtr window) {
+            try {
+                uint pid;
+                Native.GetWindowThreadProcessIdWithPid(window,out pid);
+                using(var process=Process.GetProcessById((int)pid)) return process.ProcessName;
+            } catch(Exception) {return "";}
+        }
         internal bool PreferEnglishExact {
-            get {return engine.PreferEnglishExact;}
-            set {engine.PreferEnglishExact=value;engine.Reset();}
+            get {return basePreferEnglishExact;}
+            set {basePreferEnglishExact=value;ApplyProfile();}
         }
         internal bool UseVni {
             get { return engine.UseVni; }
@@ -79,8 +106,8 @@ namespace TelexMini
         }
         internal bool RestoreInvalid=true;
         internal bool SmartEnglish {
-            get { return engine.SmartEnglish; }
-            set { engine.SmartEnglish=value; engine.Reset(); }
+            get { return baseSmartEnglish; }
+            set { baseSmartEnglish=value;ApplyProfile(); }
         }
         internal InputContextKind ContextKind {
             get {
@@ -91,7 +118,7 @@ namespace TelexMini
                 return context.GetKind(window,focused);
             }
         }
-        internal bool EffectiveEnabled { get { return ContextPolicy.UseVietnamese(enabled,AutoEnglish,ContextKind); } }
+        internal bool EffectiveEnabled { get { return ContextPolicy.UseVietnamese(enabled,AutoEnglish,ContextKind) && activeProfile!="English"; } }
         internal bool AcceptTestInput = false;
         internal event Action InjectionFailed;
         internal bool Enabled { get { return enabled; } set { enabled=value; engine.Reset(); UpdateHooks(); } }
@@ -135,12 +162,14 @@ namespace TelexMini
             Native.GetGUIThreadInfo(Native.GetWindowThreadProcessId(window,IntPtr.Zero),ref info);
             if (foreground!=window || focus!=info.Focus) {
                 engine.Reset(); foreground=window; focus=info.Focus;
+                activeProfile=ProfilesEnabled?Productivity.ProfileFor(ForegroundProcess(window)):"Default";
+                ApplyProfile();
                 if(context!=null) context.RequestCheck();
             }
             if(context!=null && contextRevision!=context.Current.Revision) { engine.Reset(); contextRevision=context.Current.Revision; }
             InputContextKind kind=InputContextMonitor.IsNativePassword(info.Focus) ? InputContextKind.Password :
                 context==null ? InputContextKind.Text : context.GetKind(window,info.Focus);
-            if(!ContextPolicy.UseVietnamese(enabled,AutoEnglish,kind)) {
+            if(activeProfile=="English" || !ContextPolicy.UseVietnamese(enabled,AutoEnglish,kind)) {
                 engine.Reset(); return Native.CallNextHookEx(keyHook,code,message,data);
             }
             if (Down(0x11) || Down(0x12) || Down(0x5B) || Down(0x5C)) { engine.Reset(); return Native.CallNextHookEx(keyHook,code,message,data); }
@@ -163,6 +192,13 @@ namespace TelexMini
             }
             if(vk==32 || vk==13 || vk==9 || (vk>=0xBA && vk<=0xC0) || (vk>=0xDB && vk<=0xDE)) {
                 string before=engine.Text, after=engine.Finish(RestoreInvalid);
+                // Expansion is opt-in and only at a real word boundary.
+                // Never expand in password/unknown fields or excluded apps.
+                if(SnippetsEnabled && kind==InputContextKind.Text &&
+                   !string.IsNullOrEmpty(before)) {
+                    string expanded=Productivity.Expand(before,snippets,true);
+                    if(expanded!=null) after=expanded;
+                }
                 engine.Reset();
                 if(before!=after) {
                     TextEditPlan edit=TextEditPlan.Between(before,after);

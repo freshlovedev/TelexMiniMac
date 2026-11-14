@@ -1,0 +1,21 @@
+#!/bin/bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+bash "$ROOT/tools/build.sh"
+DIST="$ROOT/dist"
+mkdir -p "$DIST"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+STAGE="$WORK/TelexMini-macOS-Preview"
+mkdir -p "$STAGE"
+ditto "$ROOT/build/TelexMini.app" "$STAGE/TelexMini.app"
+ditto "$ROOT/build/TelexMini Settings.app" "$STAGE/TelexMini Settings.app"
+cp "$ROOT/MACOS-README.md" "$STAGE/README-Preview.txt"
+ZIP="$DIST/TelexMini-macOS-preview.zip"
+rm -f "$ZIP"
+ditto -c -k --sequesterRsrc --keepParent "$STAGE" "$ZIP"
+shasum -a 256 "$ZIP" > "$ZIP.sha256"
+shasum -a 256 -c "$ZIP.sha256"
+echo "PREVIEW ONLY: ad-hoc signed, NOT notarized"
+echo "Archive: $ZIP"
+cat "$ZIP.sha256"

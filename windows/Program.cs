@@ -54,6 +54,8 @@ namespace TelexMini
                 UserPreferences.String("LanguagePriority","Balanced")!="Vietnamese";
             keyboard.PreferEnglishExact=UserPreferences.String("LanguagePriority","Balanced")=="English";
             keyboard.UseVni=UserPreferences.String("InputMethod","Telex")=="VNI";
+            keyboard.SnippetsEnabled=UserPreferences.Bool("SnippetsEnabled",false);
+            keyboard.ProfilesEnabled=UserPreferences.Bool("ProfilesEnabled",false);
             autoEnglish.CheckedChanged+=delegate { keyboard.AutoEnglish=autoEnglish.Checked; UserPreferences.Set("AutoEnglish",autoEnglish.Checked); keyboard.Enabled=keyboard.Enabled; SyncPerformance(); UpdateMode(); };
             restoreWords.CheckedChanged+=delegate { keyboard.RestoreInvalid=restoreWords.Checked; UserPreferences.Set("RestoreInvalid",restoreWords.Checked); };
             smartEnglish.CheckedChanged+=delegate {
@@ -71,6 +73,15 @@ namespace TelexMini
             menu.Items.Add("Ưu tiên Telex cho từ...",null,delegate { EditDictionary(true); });
             menu.Items.Add("Nạp lại từ điển",null,delegate { EnglishLexicon.Reload(); keyboard.SmartEnglish=keyboard.SmartEnglish; UpdateMode(); });
             menu.Items.Add("Cài đặt nâng cao...",null,delegate { OpenAdvanced(); });
+            menu.Items.Add("Gõ tắt & ứng dụng...",null,delegate { OpenProductivity(); });
+            menu.Items.Add("Ký tự nhanh...",null,delegate { OpenSymbols(); });
+            menu.Items.Add("Kiểm tra bản cập nhật...",null,delegate {
+                try {
+                    System.Diagnostics.Process.Start("https://github.com/muahacodon321-boop/TelexMiniMac/releases");
+                } catch(Exception ex) {
+                    MessageBox.Show(this,ex.Message,"TelexMini",MessageBoxButtons.OK,MessageBoxIcon.Information);
+                }
+            });
             menu.Items.Add("Hiện nút chuyển",null,delegate { Show(); WindowState=FormWindowState.Normal; });
             menu.Items.Add(new ToolStripSeparator()); menu.Items.Add("Thoát",null,delegate { Close(); });
             tray=new NotifyIcon { Icon=vietIcon, Text="Telex Mini — Tiếng Việt", ContextMenuStrip=menu, Visible=true };
@@ -90,6 +101,21 @@ namespace TelexMini
             SyncPerformance();
             UpdateMode();
         }
+        void OpenProductivity() {
+            keyboard.Suspended=true;
+            try {
+                if(ProductivitySettings.Open(this)) {
+                    keyboard.SnippetsEnabled=UserPreferences.Bool("SnippetsEnabled",false);
+                    keyboard.ProfilesEnabled=UserPreferences.Bool("ProfilesEnabled",false);
+                    keyboard.ReloadProductivity();
+                }
+            } finally {SyncPerformance();UpdateMode();}
+        }
+        void OpenSymbols() {
+            keyboard.Suspended=true;
+            try {using(var picker=new SymbolPicker()) picker.ShowDialog(this);}
+            finally {SyncPerformance();UpdateMode();}
+        }
         void RegisterShortcut() {
             if(registered) Native.UnregisterHotKey(Handle,1);
             string chosen=UserPreferences.String("Hotkey","Ctrl + Shift + Space");
@@ -107,9 +133,12 @@ namespace TelexMini
                     smartEnglish.Checked=UserPreferences.Bool("SmartEnglish",smartEnglish.Checked);
                     if(chrome!=null) chrome.ReloadTheme();
                     keyboard.UseVni=UserPreferences.String("InputMethod","Telex")=="VNI";
+            keyboard.SnippetsEnabled=UserPreferences.Bool("SnippetsEnabled",false);
+            keyboard.ProfilesEnabled=UserPreferences.Bool("ProfilesEnabled",false);
                     string language=UserPreferences.String("LanguagePriority","Balanced");
                     keyboard.SmartEnglish=smartEnglish.Checked && language!="Vietnamese";
                     keyboard.PreferEnglishExact=language=="English";
+                    keyboard.ReloadProductivity();
                     RegisterShortcut();
                     gameGuard.RefreshPolicy();
                     context.RequestCheck();

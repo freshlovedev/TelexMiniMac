@@ -5,13 +5,47 @@ using System.Text;
 
 namespace TelexMini
 {
+    // Portable mode is an explicit opt-in marker beside the executable.
+    // Data is isolated under Data/ and never silently migrated or deleted.
+    internal static class AppStorage {
+        internal static string ExeDirectory {get {return AppDomain.CurrentDomain.BaseDirectory;}}
+        internal static bool IsPortable {get {return File.Exists(Path.Combine(ExeDirectory,"portable.flag"));}}
+        internal static string ResolveDirectory(string exeDirectory,string localDirectory,bool portable) {
+            return portable?Path.Combine(exeDirectory,"Data"):Path.Combine(localDirectory,"TelexMini");
+        }
+        internal static string DirectoryPath {
+            get {return ResolveDirectory(ExeDirectory,
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                IsPortable);}
+        }
+        internal static void EnablePortable() {
+            string dest=Path.Combine(ExeDirectory,"Data");
+            Directory.CreateDirectory(dest);
+            string current=DirectoryPath;
+            foreach(string filename in new[]{"preferences.ini","EnglishWords.txt","VietnameseOverrides.txt","snippets.tsv","profiles.tsv"}) {
+                string src=Path.Combine(current,filename),target=Path.Combine(dest,filename);
+                if(File.Exists(src) && !File.Exists(target)) File.Copy(src,target,false);
+            }
+            File.WriteAllText(Path.Combine(ExeDirectory,"portable.flag"),
+                "TelexMini portable profile. Restart the app to activate.\n");
+        }
+        internal static void DisablePortable() {
+            string dest=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"TelexMini");
+            Directory.CreateDirectory(dest);
+            string current=DirectoryPath;
+            foreach(string filename in new[]{"preferences.ini","EnglishWords.txt","VietnameseOverrides.txt","snippets.tsv","profiles.tsv"}) {
+                string src=Path.Combine(current,filename),target=Path.Combine(dest,filename);
+                if(File.Exists(src)) File.Copy(src,target,true);
+            }
+            File.Delete(Path.Combine(ExeDirectory,"portable.flag"));
+        }
+    }
     // User settings only. No keystrokes, text history, or passwords are written to disk.
     internal static class UserPreferences
     {
         static readonly Dictionary<string,string> values = Load();
         internal static string FilePath {
-            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                 "TelexMini", "preferences.ini"); }
+            get { return Path.Combine(AppStorage.DirectoryPath,"preferences.ini"); }
         }
         static Dictionary<string,string> Load() {
             var v = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);

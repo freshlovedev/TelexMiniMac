@@ -76,6 +76,14 @@ preferences.ini
 settings.local.*
 dictionary-reload.flag
 
+# Personal productivity rules and portable application data
+snippets.tsv
+profiles.tsv
+telexmini-sync.tsv
+portable.flag
+/windows/Data/
+/windows/dist/
+
 # Credentials / signing material / env
 .env
 .env.*
