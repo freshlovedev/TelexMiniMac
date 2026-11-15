@@ -28,7 +28,12 @@ namespace TelexMini
             }
             set {
                 using(var k=Registry.CurrentUser.CreateSubKey(RunKey)) {
-                    if(value) k.SetValue("TelexMini", "\""+Application.ExecutablePath+"\"");
+                    if(value) {
+                        string canonical=Path.Combine(StableRuntime.InstallDirectory,"TelexMini.exe");
+                        string exe=!AppStorage.IsPortable && File.Exists(canonical) ?
+                            canonical : Application.ExecutablePath;
+                        k.SetValue("TelexMini", "\""+exe+"\"");
+                    }
                     else k.DeleteValue("TelexMini",false);
                 }
             }

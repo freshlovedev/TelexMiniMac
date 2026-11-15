@@ -92,14 +92,57 @@ namespace TelexMini
             if(File.Exists(ProfilesPath)) File.Replace(temp,ProfilesPath,null);
             else File.Move(temp,ProfilesPath);
         }
-        internal static string Expand(string raw,IDictionary<string,string> snippets,bool enabled)
+        internal static string Expand(string raw,IDictionary<string,string> snippets,bool enabled,Func<string> clipboardProvider=null)
         {
             if(!enabled || raw==null || snippets==null) return null;
             string value;
             if(!snippets.TryGetValue(raw,out value)) return null;
             DateTime now=DateTime.Now;
-            return value.Replace("{date}",now.ToString("yyyy-MM-dd"))
-                        .Replace("{time}",now.ToString("HH:mm"));
+            string result=value.Replace("{date}",now.ToString("yyyy-MM-dd"))
+                               .Replace("{time}",now.ToString("HH:mm"))
+                               .Replace("{datetime}",now.ToString("yyyy-MM-dd HH:mm"));
+            // Clipboard is never inspected unless the user explicitly chose
+            // the {clipboard} macro and triggers this exact shortcut in a
+            // confirmed normal text field (Keyboard.cs enforces the context).
+            if(result.Contains("{clipboard}")) {
+                // The keyboard hook must not read the Windows clipboard.
+                // Require a completed snapshot from the dedicated STA worker.
+                if(clipboardProvider==null)return null;
+                string content=clipboardProvider() ?? "";
+                if(content.Length>1024) content=content.Substring(0,1024);
+                content=content.Replace('\r',' ').Replace('\n',' ').Replace('\t',' ');
+                result=result.Replace("{clipboard}",content);
+            }
+            // TSV persists escaped line breaks; expand only after the user
+            // triggers the snippet. The cursor marker is interpreted by the
+            // hook's safe, finite key-injection plan rather than persisted.
+            return result.Replace("\\r\\n","\r\n").Replace("\\n","\r\n")
+                         .Replace("\\t","\t");
+        }
+        internal static IDictionary<string,string> ParseProfiles(string lines)
+        {
+            var result=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+            if(string.IsNullOrEmpty(lines)) return result;
+            foreach(string line in lines.Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries)) {
+                int tab=line.IndexOf('\t');
+                if(tab<=0 || line.IndexOf('\t',tab+1)>=0)continue;
+                string name=line.Substring(0,tab).Trim();
+                string mode=line.Substring(tab+1).Trim();
+                if(name.EndsWith(".exe",StringComparison.OrdinalIgnoreCase))
+                    name=name.Substring(0,name.Length-4);
+                if(name.Length>0 && (mode=="English"||mode=="Vietnamese"||mode=="Balanced"))
+                    result[name]=mode;
+            }
+            return result;
+        }
+        internal static string GetProfile(IDictionary<string,string> profiles,string process)
+        {
+            if(profiles==null || string.IsNullOrEmpty(process)) return "Default";
+            string name=process.Trim();
+            if(name.EndsWith(".exe",StringComparison.OrdinalIgnoreCase))
+                name=name.Substring(0,name.Length-4);
+            string mode;
+            return profiles.TryGetValue(name,out mode)?mode:"Default";
         }
         internal static string GetProfile(string process,string lines)
         {
@@ -117,11 +160,14 @@ namespace TelexMini
             }
             return "Default";
         }
-        internal static string ProfileFor(string app) {
+        internal static string ReadProfiles() {
             try {
                 string path=File.Exists(ProfilesPath)?ProfilesPath:PortablePath("profiles.tsv");
-                return File.Exists(path)?GetProfile(app,File.ReadAllText(path,Encoding.UTF8)):"Default";
-            } catch(IOException) {return "Default";} catch(UnauthorizedAccessException){return "Default";}
+                return File.Exists(path)?File.ReadAllText(path,Encoding.UTF8):"";
+            } catch(IOException) {return "";} catch(UnauthorizedAccessException){return "";}
+        }
+        internal static string ProfileFor(string app) {
+            return GetProfile(app,ReadProfiles());
         }
         internal static void SaveSnippets(IDictionary<string,string> snippets) {
             Directory.CreateDirectory(DirectoryPath);

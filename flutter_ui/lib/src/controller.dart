@@ -5,18 +5,39 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-enum AppPage { overview, englishDictionary, vietnamesePriority, snippets, symbols, applications, settings }
+enum AppPage { overview, englishDictionary, vietnamesePriority, snippets, symbols, applications, textTools, typingLab, diagnostics, settings }
 
 class AppController extends ChangeNotifier {
   AppController({this.settingsDirectoryOverride});
   final String? settingsDirectoryOverride;
   static const _channel = MethodChannel('com.telexmini/control');
   Timer? _modeMonitor;
+  Timer? _navigationMonitor;
+  Timer? _statusDebounce;
+  StreamSubscription<FileSystemEvent>? _preferenceEvents;
+  StreamSubscription<FileSystemEvent>? _navigationEvents;
+  bool _disposed = false;
+  bool _watching = false;
+  Future<void> checkNavigation() async {
+    if (!Platform.isWindows) return;
+    try {
+      final root = Platform.environment['APPDATA'] ?? Platform.environment['LOCALAPPDATA'];
+      if (root == null) return;
+      final file = File('$root/TelexMini/FlutterUI/navigation.txt');
+      if (!await file.exists()) return;
+      final name = (await file.readAsString()).trim();
+      await file.delete();
+      for (final candidate in AppPage.values) {
+        if (candidate.name == name) { await setPage(candidate); break; }
+      }
+    } catch (_) { /* Do not interrupt the input engine on a navigation failure. */ }
+  }
   bool _refreshingMode = false;
   bool _changingMode = false;
 
   AppPage page = AppPage.overview;
   bool darkMode = false;
+  bool compactSidebar = false;
   bool englishUI = false;
   bool vietnameseEnabled = true;
   bool automaticMode = true;
@@ -24,6 +45,9 @@ class AppController extends ChangeNotifier {
   bool restoreInvalid = true;
   bool terminalEnglish = false;
   bool snippetsEnabled = false;
+  bool instantRepairEnabled = true;
+  bool adaptiveLearningEnabled = false;
+  bool smartPunctuationEnabled = false;
   bool profilesEnabled = false;
   bool autoStart = false;
   bool portableMode = false;
@@ -33,6 +57,7 @@ class AppController extends ChangeNotifier {
   String languagePriority = 'Balanced';
   String hotkey = 'Ctrl + Shift + Space';
   String excludedApps = '';
+  String managedApps = '';
   String previewText = '';
   String snippetText = '';
   String profilesText = '';
@@ -45,6 +70,7 @@ class AppController extends ChangeNotifier {
   Future<void> load() async {
     final data = await _LocalSettings.read(settingsDirectoryOverride);
     darkMode = data['darkMode'] as bool? ?? false;
+    compactSidebar = data['compactSidebar'] as bool? ?? false;
     englishUI = data['englishUI'] as bool? ?? false;
     vietnameseEnabled = data['vietnameseEnabled'] as bool? ?? true;
     automaticMode = data['automaticMode'] as bool? ?? true;
@@ -52,6 +78,9 @@ class AppController extends ChangeNotifier {
     restoreInvalid = data['restoreInvalid'] as bool? ?? true;
     terminalEnglish = data['terminalEnglish'] as bool? ?? false;
     snippetsEnabled = data['snippetsEnabled'] as bool? ?? false;
+    instantRepairEnabled = data['instantRepairEnabled'] as bool? ?? true;
+    adaptiveLearningEnabled = data['adaptiveLearningEnabled'] as bool? ?? false;
+    smartPunctuationEnabled = data['smartPunctuationEnabled'] as bool? ?? false;
     profilesEnabled = data['profilesEnabled'] as bool? ?? false;
     autoStart = data['autoStart'] as bool? ?? false;
     portableMode = data['portableMode'] as bool? ?? false;
@@ -59,6 +88,7 @@ class AppController extends ChangeNotifier {
     languagePriority = data['languagePriority'] as String? ?? 'Balanced';
     hotkey = data['hotkey'] as String? ?? 'Ctrl + Shift + Space';
     excludedApps = data['excludedApps'] as String? ?? '';
+    managedApps = data['managedApps'] as String? ?? '';
     snippetText = data['snippetText'] as String? ?? '';
     profilesText = data['profilesText'] as String? ?? '';
     englishWords
@@ -87,11 +117,51 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The native process writes preferences.ini atomically for hotkey and tray
+  /// changes. Watch those events rather than calling the native bridge 5
+  /// times per second. Long-period polling remains only as a fallback.
   void startNativeMonitoring() {
+    if (_disposed) return;
+    _navigationMonitor ??= Timer.periodic(
+      const Duration(seconds: 5), (_) => unawaited(checkNavigation()));
     _modeMonitor ??= Timer.periodic(
-      const Duration(milliseconds: 450),
-      (_) => unawaited(refreshNativeMode()),
-    );
+      const Duration(seconds: 5), (_) => unawaited(refreshNativeMode()));
+    unawaited(checkNavigation());
+    if (!_watching && Platform.isWindows) {
+      _watching = true;
+      unawaited(_startFileWatchers());
+    }
+  }
+
+  Future<void> _startFileWatchers() async {
+    final local = settingsDirectoryOverride ??
+        '${Platform.environment['LOCALAPPDATA'] ?? Directory.current.path}/TelexMini';
+    final roaming = Platform.environment['APPDATA'];
+    try {
+      final prefs = Directory(local);
+      await prefs.create(recursive: true);
+      if (_disposed) return;
+      _preferenceEvents = prefs.watch().listen((event) {
+        if (!event.path.toLowerCase().contains('preferences.ini')) return;
+        _statusDebounce?.cancel();
+        _statusDebounce = Timer(const Duration(milliseconds: 40),
+            () => unawaited(refreshNativeMode()));
+      }, onError: (_) { /* The five-second safety poll remains active. */ });
+      if (settingsDirectoryOverride == null && roaming != null) {
+        final navigation = Directory('$roaming/TelexMini/FlutterUI');
+        await navigation.create(recursive: true);
+        if (_disposed) return;
+        _navigationEvents = navigation.watch().listen((event) {
+          if (event.path.toLowerCase().endsWith('navigation.txt')) {
+            // File creation can be signalled before the writer has closed it.
+            unawaited(Future<void>.delayed(const Duration(milliseconds: 45))
+                .then((_) => checkNavigation()));
+          }
+        }, onError: (_) { /* The navigation safety poll remains active. */ });
+      }
+    } on FileSystemException {
+      // Network profiles and locked directories still work via fallback polls.
+    }
   }
 
   Future<void> refreshNativeMode() async {
@@ -125,13 +195,19 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _modeMonitor?.cancel();
+    _navigationMonitor?.cancel();
+    _statusDebounce?.cancel();
+    unawaited(_preferenceEvents?.cancel());
+    unawaited(_navigationEvents?.cancel());
     super.dispose();
   }
 
   Map<String, dynamic> _toJson() => {
     'schemaVersion': 1,
     'darkMode': darkMode,
+    'compactSidebar': compactSidebar,
     'englishUI': englishUI,
     'vietnameseEnabled': vietnameseEnabled,
     'automaticMode': automaticMode,
@@ -139,6 +215,9 @@ class AppController extends ChangeNotifier {
     'restoreInvalid': restoreInvalid,
     'terminalEnglish': terminalEnglish,
     'snippetsEnabled': snippetsEnabled,
+    'instantRepairEnabled': instantRepairEnabled,
+    'adaptiveLearningEnabled': adaptiveLearningEnabled,
+    'smartPunctuationEnabled': smartPunctuationEnabled,
     'profilesEnabled': profilesEnabled,
     'autoStart': autoStart,
     'portableMode': portableMode,
@@ -146,6 +225,7 @@ class AppController extends ChangeNotifier {
     'languagePriority': languagePriority,
     'hotkey': hotkey,
     'excludedApps': excludedApps,
+    'managedApps': managedApps,
     'snippetText': snippetText,
     'profilesText': profilesText,
     'englishWords': englishWords,
@@ -164,6 +244,19 @@ class AppController extends ChangeNotifier {
     }
     await _LocalSettings.write(settings, settingsDirectoryOverride);
     notifyListeners();
+  }
+
+  /// Closing Flutter releases the desktop UI process. The independent
+  /// native TelexMini tray engine continues handling keys.
+  Future<void> closeSettingsWindow() async {
+    try { await _channel.invokeMethod<void>('closeUi'); }
+    on MissingPluginException { /* Only available on Windows runner. */ }
+  }
+
+  Future<String?> chooseExecutable() async {
+    try { return await _channel.invokeMethod<String>('chooseExecutable'); }
+    on MissingPluginException { return null; }
+    on PlatformException { return null; }
   }
 
   Future<List<String>> runningProcesses() async {
@@ -229,6 +322,11 @@ class AppController extends ChangeNotifier {
 
   Future<void> toggleTheme() async {
     darkMode = !darkMode;
+    await save();
+  }
+
+  Future<void> toggleCompactSidebar() async {
+    compactSidebar = !compactSidebar;
     await save();
   }
 

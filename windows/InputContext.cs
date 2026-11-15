@@ -48,7 +48,20 @@ namespace TelexMini
             return name=="streaming_client";
         }
         internal static bool ShouldYieldKeys(string name) {
-            return IsGame(name) || IsSteamRemote(name) || IsUserExcluded(name);
+            return IsGame(name) || IsRemoteClient(name) || IsUserExcluded(name);
+        }
+        internal static bool IsRemoteClient(string name) {
+            name=(name ?? "").Trim().ToLowerInvariant();
+            if(name.EndsWith(".exe"))name=name.Substring(0,name.Length-4);
+            // Real keyboard forwarding clients only. Do not apply to browsers,
+            // IDEs, normal Windows UI or background remote *servers*.
+            switch(name) {
+                case "streaming_client": case "mstsc": case "msrdc":
+                case "rdclient": case "anydesk": case "teamviewer":
+                case "rustdesk": case "parsec": case "vncviewer":
+                case "vncviewer64": case "moonlight": return true;
+                default: return false;
+            }
         }
         internal static bool IsUserExcluded(string name) {
             name=(name ?? "").Trim().ToLowerInvariant();
@@ -153,9 +166,14 @@ namespace TelexMini
         internal InputContextKind GetKind(IntPtr window,IntPtr focus) {
             uint processId=0;
             GetWindowThreadProcessId(window,out processId);
+            return GetKind(window,focus,processId);
+        }
+        internal InputContextKind GetKind(IntPtr window,IntPtr focus,uint processId) {
+            if(window==IntPtr.Zero || focus==IntPtr.Zero || processId==0)
+                return InputContextKind.Checking;
             Snapshot snapshot=current;
-            // Reuse metadata for the same exact control. A new control/window
-            // still fails closed until the background password check finishes.
+            // Reuse metadata for the same exact control and process. A changed
+            // control must be reclassified asynchronously before typing.
             return SnapshotMatches(snapshot,window,focus,processId,Volatile.Read(ref revision))
                 ? snapshot.Kind : InputContextKind.Checking;
         }
@@ -227,7 +245,9 @@ namespace TelexMini
                         try { Automation.AddAutomationFocusChangedEventHandler(focusHandler); subscribed=true; }
                         catch(COMException) { } catch(InvalidOperationException) { }
                     }
-                    Refresh(); wake.WaitOne(150);
+                    // Foreground/UIA events wake immediately; less idle polling.
+                    // The longer fallback still catches providers that lose events.
+                    Refresh(); wake.WaitOne(500);
                 }
             } finally {
                 if(subscribed) {

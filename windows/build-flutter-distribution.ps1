@@ -1,6 +1,7 @@
 param(
     [string]$FlutterExecutable = "D:\Tools\flutter\bin\flutter.bat",
-    [ValidatePattern('^[a-zA-Z0-9._-]+$')][string]$ReleaseFolderName = 'TelexMini-Windows-x64'
+    [ValidatePattern('^[a-zA-Z0-9._-]+$')][string]$ReleaseFolderName = 'TelexMini-Windows-x64',
+    [switch]$SkipTests
 )
 $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot
@@ -33,8 +34,8 @@ if (-not (Test-Path -LiteralPath $FlutterExecutable)) {
     $FlutterExecutable = $flutter.Source
 }
 
-# The existing build script reruns the complete Telex/VNI regression suite.
-& (Join-Path $Root 'build.ps1') -OutputPath $TempEngine
+# Tests are skipped only when the caller explicitly requests build-only mode.
+& (Join-Path $Root 'build.ps1') -OutputPath $TempEngine -SkipTests:$SkipTests
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $TempEngine)) {
     throw 'Native TelexMini engine did not pass its guarded build.'
 }
@@ -43,10 +44,12 @@ Push-Location $App
 try {
     & $FlutterExecutable pub get
     if ($LASTEXITCODE -ne 0) { throw 'Flutter dependency resolution failed.' }
-    & $FlutterExecutable analyze
-    if ($LASTEXITCODE -ne 0) { throw 'Flutter analysis failed.' }
-    & $FlutterExecutable test --reporter expanded
-    if ($LASTEXITCODE -ne 0) { throw 'Flutter widget tests failed.' }
+    if (-not $SkipTests) {
+        & $FlutterExecutable analyze
+        if ($LASTEXITCODE -ne 0) { throw 'Flutter analysis failed.' }
+        & $FlutterExecutable test --reporter expanded
+        if ($LASTEXITCODE -ne 0) { throw 'Flutter widget tests failed.' }
+    }
     & $FlutterExecutable build windows --release
     if ($LASTEXITCODE -ne 0) { throw 'Flutter Windows release build failed.' }
 } finally {
@@ -61,8 +64,10 @@ foreach ($relative in @('TelexMiniSettings.exe','flutter_windows.dll','data\flut
 
 # Release hardening: deterministic, offline, key-safe stress and latency statistics.
 $benchReport = Join-Path $Root 'build\perf-benchmark-latest.txt'
-& (Join-Path $Root 'test.ps1') -Benchmark *>&1 | Out-File -LiteralPath $benchReport -Encoding utf8
-if ($LASTEXITCODE -ne 0) { throw 'Native performance stress checks failed; installed files unchanged.' }
+if (-not $SkipTests) {
+    & (Join-Path $Root 'test.ps1') -Benchmark *>&1 | Out-File -LiteralPath $benchReport -Encoding utf8
+    if ($LASTEXITCODE -ne 0) { throw 'Native performance stress checks failed; installed files unchanged.' }
+}
 
 # Assemble a standalone, portable two-process desktop bundle.
 # The tests/build run first. Only close our own active TelexMini installation
@@ -86,16 +91,22 @@ Copy-Item -LiteralPath $TempEngine -Destination (Join-Path $Destination 'TelexMi
 Copy-Item -LiteralPath (Join-Path $Root 'native_engine\build\Release\TelexMiniEngine.dll') -Destination (Join-Path $Destination 'TelexMiniEngine.dll') -Force
 Copy-Item -LiteralPath (Join-Path $Root 'native_engine\build\english_seed.txt') -Destination (Join-Path $Destination 'english_seed.txt') -Force
 $instructions = @'
-TelexMini 2.3.1 - Windows Telex w/ư hotfix and bilingual typing update
+TelexMini 2.4.1-rc.1 - Windows release candidate (non-admin Hook)
 ----------------------------------------------------------------
-Launch TelexMini.exe. The native engine stays in the system tray and
-opens the shared Flutter Settings UI automatically.
+Launch TelexMini.exe from any extracted release folder. On first launch,
+TelexMini copies the bundle to %LOCALAPPDATA%\Programs\TelexMini and runs
+THAT stable executable. All future builds reuse the same tray app identity.
+The native engine stays in the system tray and opens the shared Flutter
+Settings UI automatically.
 The V/E status is always shown by the tray icon.
 Close the Flutter Settings window (X button or close icon) to free
 UI memory while the independent native engine continues in the tray.
 Left-click the tray V/E icon to open Settings again.
 Windows uses the native C++ Telex/VNI engine with a non-admin keyboard hook.
 No system input-method registration or UAC is needed to run it.
+For a deliberately portable build with no install, create portable.flag
+beside TelexMini.exe before launching (each portable path may be a separate
+Windows tray-history entry).
 The Flutter executable is TelexMiniSettings.exe, which may also be
 opened directly. Both applications must stay in the same folder.
 
@@ -139,17 +150,17 @@ if((Get-FileHash (Join-Path $Destination 'TelexMini.exe') -Algorithm SHA256).Has
 }
 $audit = [ordered]@{
     product = 'TelexMini'
-    version = '2.4.0-native-preview'
+    version = '2.4.1-rc.1'
     platform = 'Windows x64'
-    mode = 'portable release'
+    mode = 'user-local stable install; explicit portable.flag opt-out'
     built_utc = [DateTime]::UtcNow.ToString('o')
-    native_regression = 'pass'
+    native_regression = $(if($SkipTests) {'not_run_requested'} else {'pass'})
     native_composer = 'C++ TelexMiniEngine.dll; Windows hook transport retained'
     input_backend = 'Windows per-user keyboard hook; no administrator privileges'
-    bilingual_corpus = 'pass'
-    flutter_analyze = 'pass'
-    flutter_widget_tests = 'pass'
-    simulated_stress = 'pass'
+    bilingual_corpus = $(if($SkipTests) {'not_run_requested'} else {'pass'})
+    flutter_analyze = $(if($SkipTests) {'not_run_requested'} else {'pass'})
+    flutter_widget_tests = $(if($SkipTests) {'not_run_requested'} else {'pass'})
+    simulated_stress = $(if($SkipTests) {'not_run_requested'} else {'pass'})
     interactive_typing = 'verify separately in visible Windows test'
     packaged_files_verified = $true
     native_exe_sha256 = (Get-FileHash (Join-Path $Destination 'TelexMini.exe') -Algorithm SHA256).Hash
@@ -163,6 +174,7 @@ $auditPath = Join-Path (Join-Path $Root 'build') ($ReleaseFolderName+'-audit.jso
 $audit | ConvertTo-Json -Depth 3 | Set-Content -Path $auditPath -Encoding UTF8
 Write-Output ('AUDIT=' + $auditPath)
 
+Write-Output ('STABLE_LAUNCH=' + (Join-Path (Join-Path $env:LOCALAPPDATA 'Programs\TelexMini') 'TelexMini.exe'))
 Write-Output ('NATIVE=' + (Join-Path $Destination 'TelexMini.exe'))
 Write-Output ('FLUTTER=' + (Join-Path $Destination 'TelexMiniSettings.exe'))
 Write-Output ('PACKAGE=' + $Archive)

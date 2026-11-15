@@ -92,9 +92,9 @@ namespace TelexMini
         // process-global ArrayPool because typing data could be retained there.
         [ThreadStatic] static INPUT[] inputScratch;
         internal const int MaxInjectionEvents=4096;
-        internal static bool IsSafeEditSize(int erase,int insertLength,bool boundary) {
-            if(erase<0 || insertLength<0) return false;
-            long events=2L*(erase+(long)insertLength)+(boundary?2:0);
+        internal static bool IsSafeEditSize(int erase,int insertLength,bool boundary,int cursorLeft=0) {
+            if(erase<0 || insertLength<0 || cursorLeft<0 || cursorLeft>insertLength+1) return false;
+            long events=2L*(erase+(long)insertLength+cursorLeft)+(boundary?2:0);
             return events<=MaxInjectionEvents;
         }
         internal static bool EvaluateInjectionResult(uint requested,uint accepted,out bool canForward)
@@ -105,14 +105,14 @@ namespace TelexMini
             return accepted==requested;
         }
         internal static bool Replace(int erase, string insert, out bool canForward,
-                                     ushort followingKey=0)
+                                     ushort followingKey=0,int cursorLeft=0)
         {
-            if(insert==null || !IsSafeEditSize(erase,insert.Length,followingKey!=0)) {
+            if(insert==null || !IsSafeEditSize(erase,insert.Length,followingKey!=0,cursorLeft)) {
                 // Refuse a pathological batch BEFORE modifying the document.
                 canForward=true;
                 return false;
             }
-            int needed=2*(erase+insert.Length)+(followingKey==0?0:2);
+            int needed=2*(erase+insert.Length+cursorLeft)+(followingKey==0?0:2);
             if(needed==0) { canForward=false;return true; }
             INPUT[] inputs=inputScratch;
             if(inputs==null || inputs.Length<needed) {
@@ -125,6 +125,7 @@ namespace TelexMini
                 for (int i=0; i<erase; i++) { inputs[p++]=Key(8,0,0); inputs[p++]=Key(8,0,2); }
                 foreach (char c in insert) { inputs[p++]=Key(0,c,4); inputs[p++]=Key(0,c,6); }
                 if(followingKey!=0) { inputs[p++]=Key(followingKey,0,0); inputs[p++]=Key(followingKey,0,2); }
+                for(int k=0;k<cursorLeft;k++) {inputs[p++]=Key(0x25,0,0);inputs[p++]=Key(0x25,0,2);}
                 uint count=SendInput((uint)p,inputs,Marshal.SizeOf(typeof(INPUT)));
                 // Zero accepted: original physical key is safe to forward.
                 // Partially accepted: do NOT retry (could duplicate/delete text).
@@ -151,7 +152,18 @@ namespace TelexMini
         IDictionary<string,string> snippets=Productivity.ReadSnippets();
         ClipboardMacroSnapshot clipboardSnapshot;
         readonly ExpansionUndo expansionUndo=new ExpansionUndo();
+        readonly WordRepair wordRepair=new WordRepair();
+        readonly StringBuilder rawToken=new StringBuilder(64);
+        bool capitalizeNext, lastWasSpace;
+        internal bool InstantRepairEnabled=true;
+        internal bool AdaptiveLearningEnabled=false;
+        internal bool SmartPunctuationEnabled=false;
         bool suppressOneExpansion;
+        void ResetText() { engine.Reset();rawToken.Clear(); }
+        void ResetContext() {
+            ResetText();wordRepair.Clear();lastWasSpace=false;
+            capitalizeNext=false;
+        }
         IDictionary<string,string> cachedProfiles=Productivity.ParseProfiles(Productivity.ReadProfiles());
         internal void InstallIntegrationSnippets(IDictionary<string,string> testSnippets) {
             if(!AcceptTestInput)throw new InvalidOperationException("Integration mode required.");
@@ -184,7 +196,7 @@ namespace TelexMini
             engine.SmartEnglish=activeProfile=="Vietnamese" ? false :
                 activeProfile=="Balanced" ? true : baseSmartEnglish;
             engine.PreferEnglishExact=activeProfile=="Balanced" ? false : basePreferEnglishExact;
-            engine.Reset();
+            ResetText();
         }
         static string ForegroundProcess(IntPtr window) {
             try {
@@ -199,7 +211,7 @@ namespace TelexMini
         }
         internal bool UseVni {
             get { return engine.UseVni; }
-            set { if(engine.UseVni==value)return; engine.UseVni=value; engine.Reset(); }
+            set { if(engine.UseVni==value)return; engine.UseVni=value; ResetText(); }
         }
         internal bool RestoreInvalid=true;
         internal bool SmartEnglish {
@@ -224,10 +236,10 @@ namespace TelexMini
                 if(enabled==value)return;
                 if(clipboardSnapshot!=null)clipboardSnapshot.Cancel();
                 expansionUndo.Clear(); suppressOneExpansion=false;
-                enabled=value;engine.Reset();UpdateHooks();
+                enabled=value;ResetText();UpdateHooks();
             }
         }
-        internal bool Suspended { get { return suspended; } set { if(suspended==value) return; if(clipboardSnapshot!=null)clipboardSnapshot.Cancel(); expansionUndo.Clear(); suppressOneExpansion=false; suspended=value; engine.Reset(); UpdateHooks(); } }
+        internal bool Suspended { get { return suspended; } set { if(suspended==value) return; if(clipboardSnapshot!=null)clipboardSnapshot.Cancel(); expansionUndo.Clear(); suppressOneExpansion=false; suspended=value; ResetText(); UpdateHooks(); } }
         internal bool HooksInstalled { get { return keyHook!=IntPtr.Zero || mouseHook!=IntPtr.Zero; } }
         internal Keyboard(InputContextMonitor monitor=null)
         {
@@ -255,19 +267,35 @@ namespace TelexMini
             int m=message.ToInt32();
             if (code >= 0 && (m==0x201 || m==0x204 || m==0x207 || m==0x20B || m==0x20A || m==0x20E)) {
                 expansionUndo.Clear(); suppressOneExpansion=false;
-                engine.Reset(); if(context!=null) context.RequestCheck();
+                ResetContext(); if(context!=null) context.RequestCheck();
             }
             return Native.CallNextHookEx(mouseHook,code,message,data);
         }
         long hookSamples, hookTotalTicks, hookMaximumTicks;
+        const int HookSampleWindow=2048;
+        readonly long[] recentHookDurations=new long[HookSampleWindow];
+        long hookWriteCursor;
         internal string HookDiagnostics() {
+            // A bounded timing-only window, with no keycodes or user text.
+            // Sorting runs ONLY when the Diagnostics page requests metrics,
+            // never inside the low-level keyboard hook callback.
             long count=Interlocked.Read(ref hookSamples);
             long total=Interlocked.Read(ref hookTotalTicks);
             long maximum=Interlocked.Read(ref hookMaximumTicks);
+            var values=new List<long>(HookSampleWindow);
+            foreach(long sample in recentHookDurations)
+                if(sample>0)values.Add(sample);
+            values.Sort();
             double scale=1000.0 / Stopwatch.Frequency;
+            double p95=values.Count==0?0:values[Math.Min(values.Count-1,
+                Math.Max(0,(int)Math.Ceiling(.95*values.Count)-1))]*scale;
+            double p99=values.Count==0?0:values[Math.Min(values.Count-1,
+                Math.Max(0,(int)Math.Ceiling(.99*values.Count)-1))]*scale;
             return count.ToString(CultureInfo.InvariantCulture) + "\t" +
                    (count>0?total*scale/count:0).ToString("F4",CultureInfo.InvariantCulture) + "\t" +
-                   (maximum*scale).ToString("F4",CultureInfo.InvariantCulture);
+                   (maximum*scale).ToString("F4",CultureInfo.InvariantCulture) + "\t" +
+                   p95.ToString("F4",CultureInfo.InvariantCulture) + "\t" +
+                   p99.ToString("F4",CultureInfo.InvariantCulture);
         }
         void PrepareClipboardSnapshot(string word,InputContextKind kind)
         {
@@ -289,6 +317,8 @@ namespace TelexMini
                 if(ticks>=0 && ticks<Stopwatch.Frequency*2) {
                     Interlocked.Increment(ref hookSamples);
                     Interlocked.Add(ref hookTotalTicks,ticks);
+                    long position=Interlocked.Increment(ref hookWriteCursor)-1;
+                    Interlocked.Exchange(ref recentHookDurations[(int)(position%HookSampleWindow)],ticks);
                     long previous;
                     do {
                         previous=Interlocked.Read(ref hookMaximumTicks);
@@ -303,10 +333,17 @@ namespace TelexMini
                 return Native.CallNextHookEx(keyHook,code,message,data);
             var key=Marshal.PtrToStructure<Native.KBD>(data);
             if (key.Extra == Native.Marker) return Native.CallNextHookEx(keyHook,code,message,data);
-            if ((key.Flags & 0x10) != 0 && !AcceptTestInput) { engine.Reset(); return Native.CallNextHookEx(keyHook,code,message,data); }
+            if ((key.Flags & 0x10) != 0 && !AcceptTestInput) { ResetText(); return Native.CallNextHookEx(keyHook,code,message,data); }
             int m=message.ToInt32();
             if (m!=0x100 && m!=0x104) return Native.CallNextHookEx(keyHook,code,message,data);
             uint vk=key.Key;
+            // The repair shortcut is the only non-text key that may touch the
+            // last word, and only while the original focused control matches.
+            // A new physical key invalidates the one-shot repair token.
+            bool repairShortcut=vk==8 && Down(0x11) && Down(0x12) &&
+                !Down(0x5B) && !Down(0x5C);
+            if(!repairShortcut && vk!=0x10 && vk!=0x11 && vk!=0x12)
+                wordRepair.Clear();
             // Only characters, deletion and word boundaries need a focused-control
             // lookup. Function/navigation/modifier keys invalidate composition and
             // pass through without GetGUIThreadInfo/UIA/foreground process lookup.
@@ -318,7 +355,7 @@ namespace TelexMini
             if(!textKey && !boundaryKey && vk!=8) {
                 if(vk!=0x10 && vk!=0xA0 && vk!=0xA1 && vk!=0x14) {
                     if(clipboardSnapshot!=null)clipboardSnapshot.Cancel();
-                    expansionUndo.Clear();suppressOneExpansion=false;engine.Reset();
+                    expansionUndo.Clear();suppressOneExpansion=false;ResetText();
                 }
                 return Native.CallNextHookEx(keyHook,code,message,data);
             }
@@ -328,31 +365,50 @@ namespace TelexMini
             var info=new Native.GUIInfo { Size=Native.GUIInfoSize };
             if(focusThread==0 || !Native.GetGUIThreadInfo(focusThread,ref info) || info.Focus==IntPtr.Zero) {
                 if(clipboardSnapshot!=null)clipboardSnapshot.Cancel();
-                expansionUndo.Clear();suppressOneExpansion=false;engine.Reset();
+                expansionUndo.Clear();suppressOneExpansion=false;ResetText();
                 return Native.CallNextHookEx(keyHook,code,message,data);
             }
             if (foreground!=window || focus!=info.Focus) {
                 if(clipboardSnapshot!=null)clipboardSnapshot.Cancel();
                 expansionUndo.Clear(); suppressOneExpansion=false;
-                engine.Reset(); foreground=window; focus=info.Focus;
+                ResetText(); foreground=window; focus=info.Focus;
                 activeProfile=ProfilesEnabled?Productivity.GetProfile(cachedProfiles,ForegroundProcess(window)):"Default";
                 ApplyProfile();
                 if(context!=null) context.RequestCheck();
             }
-            if(context!=null && contextRevision!=context.Current.Revision) { if(clipboardSnapshot!=null)clipboardSnapshot.Cancel(); expansionUndo.Clear(); suppressOneExpansion=false; engine.Reset(); contextRevision=context.Current.Revision; }
+            if(context!=null && contextRevision!=context.Current.Revision) { if(clipboardSnapshot!=null)clipboardSnapshot.Cancel(); expansionUndo.Clear(); suppressOneExpansion=false; ResetText(); contextRevision=context.Current.Revision; }
             InputContextKind kind=InputContextMonitor.IsNativePassword(info.Focus) ? InputContextKind.Password :
                 context==null ? InputContextKind.Text : context.GetKind(window,info.Focus,focusedPid);
+            if(repairShortcut && InstantRepairEnabled && kind==InputContextKind.Text) {
+                int erase;string insert,restored;
+                if(wordRepair.TryPlan(window,info.Focus,out erase,out insert,out restored)) {
+                    bool forward;
+                    if(Native.Replace(erase,insert,out forward)) {
+                        wordRepair.ClearAfterRepair();
+                        suppressOneExpansion=true;
+                        ResetText();
+                        if(AdaptiveLearningEnabled)AdaptiveDictionary.QueueConfirmedEnglish(restored);
+                        return new IntPtr(1);
+                    }
+                    wordRepair.Clear();
+                    if(InjectionFailed!=null)InjectionFailed();
+                    if(!forward)return new IntPtr(1);
+                }
+                return Native.CallNextHookEx(keyHook,code,message,data);
+            }
             if(activeProfile=="English" || !ContextPolicy.UseVietnamese(enabled,AutoEnglish,kind)) {
                 if(clipboardSnapshot!=null)clipboardSnapshot.Cancel();
                 expansionUndo.Clear(); suppressOneExpansion=false;
-                engine.Reset(); return Native.CallNextHookEx(keyHook,code,message,data);
+                ResetText(); return Native.CallNextHookEx(keyHook,code,message,data);
             }
-            if (Down(0x11) || Down(0x12) || Down(0x5B) || Down(0x5C)) { expansionUndo.Clear(); suppressOneExpansion=false; engine.Reset(); return Native.CallNextHookEx(keyHook,code,message,data); }
+            if (Down(0x11) || Down(0x12) || Down(0x5B) || Down(0x5C)) { expansionUndo.Clear(); suppressOneExpansion=false; ResetText(); return Native.CallNextHookEx(keyHook,code,message,data); }
             if(vk!=8 && vk!=0x10 && vk!=0xA0 && vk!=0xA1 && vk!=0x14) {
                 expansionUndo.Clear();
                 if(vk!=32)suppressOneExpansion=false;
             }
             if (vk==8) {
+                if(rawToken.Length>0)rawToken.Length--;
+                lastWasSpace=false;
                 if(clipboardSnapshot!=null)clipboardSnapshot.Cancel();
                 int erase;string insert;
                 if(kind==InputContextKind.Text &&
@@ -363,7 +419,7 @@ namespace TelexMini
                         suppressOneExpansion=true;
                         return new IntPtr(1);
                     }
-                    engine.Reset();
+                    ResetText();
                     if(InjectionFailed!=null)InjectionFailed();
                     if(!canForward)return new IntPtr(1);
                 }
@@ -373,20 +429,31 @@ namespace TelexMini
                 (engine.UseVni && vk>=0x31 && vk<=0x39 && !Down(0x10))) {
                 char c=(char)vk;
                 if (!(Down(0x10) ^ ((Native.GetKeyState(0x14)&1)!=0))) c=char.ToLowerInvariant(c);
+                bool forceCapital=SmartPunctuationEnabled && capitalizeNext &&
+                    rawToken.Length==0 && c>='a' && c<='z';
+                if(forceCapital)c=char.ToUpperInvariant(c);
+                capitalizeNext=false;lastWasSpace=false;
+                if(rawToken.Length<64) rawToken.Append(c);
                 string before=engine.Text, after=engine.Push(c);
                 PrepareClipboardSnapshot(after,kind);
-                if (after==before+c) return Native.CallNextHookEx(keyHook,code,message,data);
+                if (after==before+c && !forceCapital)
+                    return Native.CallNextHookEx(keyHook,code,message,data);
                 TextEditPlan edit=TextEditPlan.Between(before,after);
                 bool canForward;
                 if (!Native.Replace(edit.Erase,edit.Insert,out canForward)) {
-                    engine.Reset();
+                    ResetText();
                     if (InjectionFailed!=null) InjectionFailed();
                     if(canForward) return Native.CallNextHookEx(keyHook,code,message,data);
                 }
                 return new IntPtr(1);
             }
             if(vk==32 || vk==13 || vk==9 || (vk>=0xBA && vk<=0xC0) || (vk>=0xDB && vk<=0xDE)) {
+                if(vk==32 && SmartPunctuationEnabled && lastWasSpace) {
+                    ResetText();return new IntPtr(1); // opt-in: avoid duplicate spaces
+                }
+                string original=rawToken.ToString();
                 string before=engine.Text, after=engine.Finish(RestoreInvalid);
+                string finishedWord=after;
                 string expanded=null;
                 // Expansion is opt-in and only at a real word boundary.
                 // Never expand in password/unknown fields or excluded apps.
@@ -405,21 +472,41 @@ namespace TelexMini
                 }
                 if(clipboardSnapshot!=null)clipboardSnapshot.Cancel();
                 suppressOneExpansion=false;
-                engine.Reset();
+                ResetText();
+                if(SmartPunctuationEnabled) {
+                    if(vk==0xBE || (vk==0x31 && Down(0x10)))capitalizeNext=true;
+                    else if(vk!=32)capitalizeNext=false;
+                    lastWasSpace=vk==32;
+                }
+                int cursorLeft=0;
+                if(expanded!=null && expanded.Contains("{cursor}")) {
+                    // Cursor placement only on Space, never on Enter/Tab:
+                    // those keys can have app-specific focus/navigation effects.
+                    int at=expanded.IndexOf("{cursor}",StringComparison.Ordinal);
+                    if(vk==32 && at>=0) {
+                        expanded=expanded.Replace("{cursor}","");
+                        cursorLeft=expanded.Length-at+1; // include final SPACE
+                        after=expanded;
+                    } else { expanded=null;after=finishedWord; }
+                }
                 if(before!=after) {
                     TextEditPlan edit=TextEditPlan.Between(before,after);
                     bool canForward;
-                    if(!Native.Replace(edit.Erase,edit.Insert,out canForward,(ushort)vk)) {
-                        engine.Reset();
+                    if(!Native.Replace(edit.Erase,edit.Insert,out canForward,(ushort)vk,cursorLeft)) {
+                        ResetText();
                         if(InjectionFailed!=null) InjectionFailed();
                         if(canForward) return Native.CallNextHookEx(keyHook,code,message,data);
-                    } else if(expanded!=null && vk==32 && kind==InputContextKind.Text) {
-                        expansionUndo.Arm(before,after,window,info.Focus);
+                    } else if(vk==32 && kind==InputContextKind.Text) {
+                        if(expanded!=null && cursorLeft==0)expansionUndo.Arm(before,after,window,info.Focus);
+                        if(expanded==null && InstantRepairEnabled)
+                            wordRepair.Arm(original,after,window,info.Focus);
                     }
                     return new IntPtr(1);
                 }
+                if(vk==32 && InstantRepairEnabled && kind==InputContextKind.Text)
+                    wordRepair.Arm(original,after,window,info.Focus);
             }
-            if (vk!=0x10 && vk!=0xA0 && vk!=0xA1 && vk!=0x14) { if(clipboardSnapshot!=null)clipboardSnapshot.Cancel(); expansionUndo.Clear(); suppressOneExpansion=false; engine.Reset(); }
+            if (vk!=0x10 && vk!=0xA0 && vk!=0xA1 && vk!=0x14) { if(clipboardSnapshot!=null)clipboardSnapshot.Cancel(); expansionUndo.Clear(); suppressOneExpansion=false; ResetText(); }
             return Native.CallNextHookEx(keyHook,code,message,data);
         }
         // Explicit safe recovery after resume/session-unlock or via tray command.
@@ -429,7 +516,7 @@ namespace TelexMini
             if(disposed)return false;
             if(clipboardSnapshot!=null)clipboardSnapshot.Cancel();
             expansionUndo.Clear(); suppressOneExpansion=false;
-            engine.Reset();
+            ResetText();
             RemoveHooks();
             if(suspended || !enabled)return true;
             try {

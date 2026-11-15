@@ -126,10 +126,10 @@ class OverviewPage extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(child: Text(
                 controller.nativeConnected
-                  ? controller.t('Giao diện điều khiển đã kết nối · Offline',
-                    'Settings bridge connected · Offline')
-                  : controller.t('Chưa kết nối giao diện điều khiển',
-                    'Settings bridge not connected'),
+                  ? controller.t('Đã kết nối bộ máy gõ · Hoạt động offline',
+                    'Native engine connected · Offline')
+                  : controller.t('Chưa kết nối bộ máy gõ hệ thống',
+                    'Native input engine not connected'),
                 style: const TextStyle(color: muted, fontSize: 11),
               )),
               Text(controller.t('Không lưu lịch sử gõ', 'No typing history'),
@@ -262,7 +262,8 @@ class _DictionaryPageState extends State<DictionaryPage> {
       subtitle: widget.vietnamese
         ? c.t('Các từ cần được ưu tiên xử lý theo quy tắc tiếng Việt.','Words that should prefer Vietnamese composition.')
         : c.t('Bảo vệ tên riêng, thuật ngữ và từ chuyên ngành khỏi bị chuyển đổi.','Protect names, terms and technical words from conversion.'),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      child: LayoutBuilder(builder: (context, space) {
+        final content = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
           Expanded(child: TextField(
             onChanged: (v) => setState(() => query=v),
@@ -271,7 +272,24 @@ class _DictionaryPageState extends State<DictionaryPage> {
           const SizedBox(width: 12),
           PrimaryAction(label: c.t('Thêm từ','Add word'), icon: Icons.add, onPressed: _add),
         ]),
-        const SizedBox(height: 14),
+        const SizedBox(height: 10),
+        Row(children: [
+          const Icon(Icons.tips_and_updates_outlined, color: teal, size: 16),
+          const SizedBox(width: 6),
+          Text(c.t('Ví dụ gợi ý · nhấn + để thêm', 'Suggested examples · click + to add'),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 11)),
+        ]),
+        const SizedBox(height: 5),
+        Wrap(spacing: 6, runSpacing: 4, children: (widget.vietnamese
+          ? <String>['been', 'boons', 'chayj', 'kieeur']
+          : <String>['boost', 'parameter', 'download', 'setup', 'exe']
+        ).map((word) => ActionChip(
+          visualDensity: VisualDensity.compact,
+          avatar: const Icon(Icons.add_circle_outline_rounded, size: 15, color: teal),
+          label: Text(word, style: const TextStyle(fontSize: 11)),
+          onPressed: () => c.addWord(word, vietnamese: widget.vietnamese),
+        )).toList()),
+        const SizedBox(height: 9),
         Expanded(child: SurfaceCard(
           padding: const EdgeInsets.all(8),
           child: Column(children: [
@@ -315,7 +333,14 @@ class _DictionaryPageState extends State<DictionaryPage> {
             ),
           ]),
         )),
-      ]),
+      ]);
+        // The Windows logical height can drop below 300 px when a 125–150%
+        // scale is applied to a compact Settings window. Keep the search and
+        // list inside an explicit scroll area rather than overflowing.
+        return space.maxHeight < 450
+          ? SingleChildScrollView(child: SizedBox(height: 460, child: content))
+          : content;
+      }),
     );
   }
 
@@ -352,6 +377,13 @@ class SnippetsPage extends StatefulWidget {
 
 class _SnippetsPageState extends State<SnippetsPage> {
   late final TextEditingController textController;
+  final Map<String, String> examples = const {
+    'dc': 'được',
+    'ntn': 'như thế nào',
+    'sdt': 'Số điện thoại:',
+    'eml': 'Email:',
+    'camon': 'Cảm ơn bạn!',
+  };
 
   @override
   void initState() {
@@ -365,70 +397,135 @@ class _SnippetsPageState extends State<SnippetsPage> {
     super.dispose();
   }
 
+  void addExample(String key, String value) {
+    final lines = textController.text.split('\n');
+    if (lines.any((line) => line.split('\t').first.trim() == key)) return;
+    final existing = textController.text.trimRight();
+    textController.text = existing.isEmpty ? '$key\t$value' : '$existing\n$key\t$value';
+    widget.controller.snippetText = textController.text;
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
     return PageFrame(
       controller: controller,
-      title: controller.t('Gõ tắt thông minh','Smart snippets'),
-      subtitle: controller.t('Tạo cụm từ thay thế chạy hoàn toàn offline.','Create offline text-expansion shortcuts.'),
+      title: controller.t('Gõ tắt thông minh', 'Smart snippets'),
+      subtitle: controller.t('Bấm + để thêm ví dụ, chỉnh sửa rồi lưu.', 'Add an example, edit, then save.'),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        SurfaceCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SurfaceCard(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           PreferenceSwitch(
             title: controller.t('Bật mở rộng gõ tắt','Enable snippet expansion'),
-            subtitle: controller.t('Chỉ mở rộng sau dấu cách, Enter hoặc Tab','Expand after Space, Enter or Tab'),
+            subtitle: controller.t('Sau dấu cách, Enter hoặc Tab','After Space, Enter or Tab'),
             value: controller.snippetsEnabled,
-            onChanged: (v) { controller.snippetsEnabled=v; controller.save(); },
+            onChanged: (v) { controller.snippetsEnabled = v; controller.save(); },
           ),
-          const Divider(),
-          const FieldLabel('SHORTCUTS'),
-          Expanded(child: TextField(
-            expands: true,
-            minLines: null,
-            maxLines: null,
-            textAlignVertical: TextAlignVertical.top,
-            controller: textController,
-            onChanged: (v) { controller.snippetText=v; },
-            decoration: const InputDecoration(
-              hintText: 'dc\tđược\nntn\tnhư thế nào',
-              alignLabelWithHint: true,
+          const Divider(height: 14),
+          Row(children: [
+            const Icon(Icons.lightbulb_outline_rounded, color: teal, size: 17),
+            const SizedBox(width: 7),
+            Text(controller.t('VÍ DỤ CÓ SẴN', 'READY EXAMPLES'),
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11)),
+          ]),
+          const SizedBox(height: 7),
+          Wrap(spacing: 7, runSpacing: 6, children: examples.entries.map((e) =>
+            ActionChip(
+              visualDensity: VisualDensity.compact,
+              avatar: const Icon(Icons.add_rounded, color: teal, size: 16),
+              label: Text('${e.key} → ${e.value}',
+                style: const TextStyle(fontSize: 11)),
+              onPressed: () => addExample(e.key, e.value),
             ),
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-          )),
-          const SizedBox(height: 12),
-          Align(alignment: Alignment.centerRight, child: PrimaryAction(
-            label: controller.t('Lưu thay đổi','Save changes'),
-            onPressed: controller.save,
-          )),
+          ).toList()),
         ])),
+        const SizedBox(height: 9),
+        Expanded(child: SurfaceCard(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const FieldLabel('PHÍM TẮT  →  NỘI DUNG (TAB)'),
+            Expanded(child: TextField(
+              expands: true,
+              minLines: null,
+              maxLines: null,
+              textAlignVertical: TextAlignVertical.top,
+              controller: textController,
+              onChanged: (v) { controller.snippetText = v; },
+              decoration: const InputDecoration(
+                hintText: 'dc\tđược\nntn\tnhư thế nào',
+              ),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            )),
+            const SizedBox(height: 9),
+            Align(alignment: Alignment.centerRight, child: PrimaryAction(
+              label: controller.t('Lưu thay đổi', 'Save changes'),
+              onPressed: controller.save,
+            )),
+          ],
+        ))),
       ]),
     );
   }
 }
 
-class SymbolsPage extends StatelessWidget {
+class SymbolsPage extends StatefulWidget {
   const SymbolsPage({super.key, required this.controller});
   final AppController controller;
   @override
-  Widget build(BuildContext context) => PageFrame(
-    controller: controller,
-    title: controller.t('Ký tự nhanh','Quick symbols'),
-    subtitle: controller.t('Chọn ký tự để sao chép, sau đó dán vào ứng dụng đang dùng.','Select a symbol to copy, then paste it into your app.'),
-    child: SurfaceCard(
-      child: Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        children: controller.symbols.map((symbol) => SizedBox(
-          width: 62,
-          height: 62,
-          child: OutlinedButton(
-            onPressed: () => controller.copySymbol(symbol),
-            child: Text(symbol, style: const TextStyle(fontSize: 23)),
-          ),
-        )).toList(),
-      ),
-    ),
-  );
+  State<SymbolsPage> createState() => _SymbolsPageState();
+}
+
+class _SymbolsPageState extends State<SymbolsPage> {
+  int selected = 0;
+  static const categories = <String, List<String>>{
+    'Phổ biến': ['→','←','↑','↓','↔','✓','✕','★','☆','♥','©','®','™','…'],
+    'Toán học': ['±','∞','≠','≤','≥','×','÷','≈','√','∑','π','∆'],
+    'Tiền tệ': ['€','£','¥','₫','\u0024','¢','₹'],
+    'Ký hiệu': ['°','·','—','•','§','¶','№','@','#','°C'],
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final category = categories.keys.elementAt(selected);
+    return PageFrame(
+      controller: controller,
+      title: controller.t('Ký tự nhanh', 'Quick symbols'),
+      subtitle: controller.t('Chọn nhóm, bấm ký tự để sao chép vào clipboard.',
+        'Choose a category and click a symbol to copy.'),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        SurfaceCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(children: [
+            Icon(Icons.auto_awesome_rounded, size: 18, color: teal),
+            SizedBox(width: 8),
+            Text('KÝ TỰ CÓ SẴN', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+          ]),
+          const SizedBox(height: 10),
+          Wrap(spacing: 7, runSpacing: 5, children: categories.keys.toList()
+            .asMap().entries.map((entry) => ChoiceChip(
+              label: Text(entry.value),
+              selected: selected == entry.key,
+              onSelected: (_) => setState(() => selected = entry.key),
+            )).toList()),
+        ])),
+        const SizedBox(height: 9),
+        Expanded(child: SurfaceCard(child: Align(
+          alignment: Alignment.topLeft,
+          child: SingleChildScrollView(child: Wrap(
+            spacing: 9, runSpacing: 9,
+            children: categories[category]!.map((symbol) => SizedBox(
+              width: 58, height: 53,
+              child: OutlinedButton(
+                onPressed: () => controller.copySymbol(symbol),
+                style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
+                child: Text(symbol, style: const TextStyle(fontSize: 21)),
+              ),
+            )).toList(),
+          )),
+        ))),
+      ]),
+    );
+  }
 }
 
 class SettingsPage extends StatelessWidget {
@@ -461,6 +558,21 @@ class SettingsPage extends StatelessWidget {
           const Divider(height: 10),
           PreferenceSwitch(title: controller.t('Khôi phục từ không hợp lệ','Restore invalid words'), subtitle: controller.t('Không giữ dấu khi chuỗi không hợp lệ','Remove marks from invalid sequences'), value: controller.restoreInvalid,
             onChanged: (v) { controller.restoreInvalid=v; controller.save(); }),
+          const Divider(height: 10),
+          PreferenceSwitch(title: controller.t('Sửa nhanh từ vừa gõ','Instant Word Repair'),
+            subtitle: controller.t('Ctrl+Alt+Backspace ngay sau từ và dấu cách','Ctrl+Alt+Backspace after a word and space'),
+            value: controller.instantRepairEnabled,
+            onChanged:(v) {controller.instantRepairEnabled=v;controller.save();}),
+          const Divider(height: 10),
+          PreferenceSwitch(title: controller.t('Từ điển tự học có xác nhận','Adaptive Dictionary'),
+            subtitle: controller.t('Chỉ học khi chủ động sửa lại một từ','Learn only from an explicit word repair'),
+            value: controller.adaptiveLearningEnabled,
+            onChanged:(v) {controller.adaptiveLearningEnabled=v;controller.save();}),
+          const Divider(height: 10),
+          PreferenceSwitch(title: controller.t('Dấu câu thông minh','Smart Punctuation'),
+            subtitle: controller.t('Tùy chọn viết hoa đầu câu, tránh dấu cách liên tiếp','Optional sentence capitalization and duplicate-space guard'),
+            value: controller.smartPunctuationEnabled,
+            onChanged:(v) {controller.smartPunctuationEnabled=v;controller.save();}),
           const Divider(height: 10),
           PreferenceSwitch(title: controller.t('Tự dùng English trong terminal','Use English in terminal'), subtitle: controller.t('Giữ nguyên lệnh và mã nguồn','Preserve commands and source code'), value: controller.terminalEnglish,
             onChanged: (v) { controller.terminalEnglish=v; controller.save(); }),

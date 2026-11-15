@@ -115,6 +115,47 @@ namespace TelexMini
             ReplayScenario("boons beens","bốn bến");
             ReplayScenario("nguowfi tuyeern","người tuyển");
             ReplayScenario("kieeru\b u","kiể u");
+            // Packaging regression: Flutter assets MUST be present in the
+            // stable user-local installation. Do not copy the user's data.
+            string installSample=Path.Combine(Path.GetTempPath(),"telexmini-install-"+Guid.NewGuid().ToString("N"));
+            try {
+                string src=Path.Combine(installSample,"source");
+                string dest=Path.Combine(installSample,"destination");
+                Directory.CreateDirectory(Path.Combine(src,"data","flutter_assets"));
+                File.WriteAllText(Path.Combine(src,"data","flutter_assets","FontManifest.json"),"expected");
+                File.WriteAllText(Path.Combine(src,"portable.flag"),"1");
+                StableRuntime.CopyBundle(src,dest);
+                Equal("Stable install preserves Flutter assets","expected",
+                    File.ReadAllText(Path.Combine(dest,"data","flutter_assets","FontManifest.json")));
+                Equal("Stable install skips portable opt-out flag","False",
+                    File.Exists(Path.Combine(dest,"portable.flag")).ToString());
+            } finally {
+                if(Directory.Exists(installSample))Directory.Delete(installSample,true);
+            }
+            // Windows productivity features (pure operations and focus-bound
+            // recovery only; never type into a real user's editor in tests).
+            Equal("Text Tools NFC","tiếng",TextTransforms.Apply("tiếng",TextOperation.Nfc));
+            Equal("Text Tools remove marks","Tieng Viet dang",TextTransforms.Apply("Tiếng Việt đang",TextOperation.RemoveMarks));
+            Equal("Text Tools uppercase","CHÀO",TextTransforms.Apply("chào",TextOperation.Upper));
+            Equal("Text Tools title case","Xin Chào",TextTransforms.Apply("xIN cHÀO",TextOperation.Title));
+            Equal("Text Tools sentence case","Chào. Tiếp!",TextTransforms.Apply("chào. tiếp!",TextOperation.Sentence));
+            Equal("Text Tools whitespace","a b"+Environment.NewLine+"c",TextTransforms.Apply(" a  b  \n  c\t",TextOperation.TrimSpaces));
+            Equal("Text Tools Markdown","- Alpha",TextTransforms.Apply("• Alpha",TextOperation.Markdown));
+            var repair=new WordRepair();
+            Equal("Word Repair arm","True",repair.Arm("now","nơ",new IntPtr(22),new IntPtr(44)).ToString());
+            int repairErase;string repairInsert,repairRaw;
+            Equal("Word Repair plans for focused field","True",repair.TryPlan(new IntPtr(22),new IntPtr(44),out repairErase,out repairInsert,out repairRaw).ToString());
+            Equal("Word Repair erase word plus space",( "nơ".Length+1).ToString(),repairErase.ToString());
+            Equal("Word Repair restores literal plus space","now ",repairInsert);
+            Equal("Word Repair restored raw word","now",repairRaw);
+            Equal("Word Repair refuses unrelated focus","False",repair.TryPlan(new IntPtr(22),new IntPtr(45),out repairErase,out repairInsert,out repairRaw).ToString());
+            Equal("Adaptive learning rejects secrets","False",AdaptiveDictionary.Valid("my-password").ToString());
+            Equal("Adaptive learning rejects long tokens","False",AdaptiveDictionary.Valid(new string('a',100)).ToString());
+            Equal("Adaptive learning accepts deliberate English correction","True",AdaptiveDictionary.Valid("boost").ToString());
+            Equal("Cursor injection bounds","False",Native.IsSafeEditSize(0,1,true,3).ToString());
+            Equal("Cursor injection ordinary","True",Native.IsSafeEditSize(5,24,true,13).ToString());
+            var multiline=Productivity.ReadSnippetsFromText("ml\tHello\\n{cursor}world\n");
+            Equal("Multiline snippet newline","Hello\r\n{cursor}world",Productivity.Expand("ml",multiline,true));
             var snippets=Productivity.ReadSnippetsFromText("dc\tđược\nko\tkhông\n");
             Equal("Snippet explicit enabled","được",Productivity.Expand("dc",snippets,true));
             Equal("Snippet case insensitive","không",Productivity.Expand("KO",snippets,true));
@@ -491,7 +532,12 @@ namespace TelexMini
                 hooks.UseVni=false;
                 Equal("Unchanged keyboard config keeps in-progress word",composing,activeEngine.Text);
                 var stats=hooks.HookDiagnostics().Split('\t');
-                Equal("Hook diagnostics contain three aggregate fields","3",stats.Length.ToString());
+                Equal("Hook diagnostics contain five timing-only fields","5",stats.Length.ToString());
+                double p95Metric,p99Metric;
+                Equal("Hook p95 numeric","True",double.TryParse(stats[3],System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,out p95Metric).ToString());
+                Equal("Hook p99 numeric","True",double.TryParse(stats[4],System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,out p99Metric).ToString());
                 Equal("Hook diagnostics never contain typed text","False",hooks.HookDiagnostics().Contains("password").ToString());
                 hooks.Enabled=false;
                 Equal("Manual E removes both hooks","False",hooks.HooksInstalled.ToString());
@@ -707,24 +753,29 @@ namespace TelexMini
         sealed class IntegrationForm : Form
         {
             readonly TextBox box=new TextBox { Dock=DockStyle.Fill, Multiline=true, ImeMode=ImeMode.Disable };
+            readonly TextBox password=new TextBox { Dock=DockStyle.Bottom, Height=30,
+                UseSystemPasswordChar=true, ImeMode=ImeMode.Disable };
             readonly Timer timer=new Timer { Interval=45 };
             readonly Keyboard hook=new Keyboard { AcceptTestInput=true };
-            readonly string[] input={"tieengs vieetj", "truowngf nguowif", "ass aaa ddd", "toasn", "tieengs\bg", "as", "as", "esscape tieengs vieetj", "ess\bscape", "esscape.as", "escape tieengs ", "hello.browser ", "github\t", "dc ", "dc \b", "w", "w ", "ow", "uw", "aw", "now", "now ", "noww ", "uow", "windows", "now"};
-            readonly string[] expected={"tiếng việt", "trường người", "as aa dd", "toán", "tiếng", "as", "á", "escape tiếng việt", "escape", "escape.á", "escape tiếng ", "hello.browser ", "github", "Địa chỉ: ", "dc", "ư", "ư ", "ơ", "ư", "ă", "nơ", "nơ ", "now ", "ươ", "windows", "now"};
+            readonly string[] input={"tieengs vieetj", "truowngf nguowif", "ass aaa ddd", "toasn", "tieengs\bg", "as", "as", "esscape tieengs vieetj", "ess\bscape", "esscape.as", "escape tieengs ", "hello.browser ", "github\t", "dc ", "dc \b", "w", "w ", "ow", "uw", "aw", "now", "now ", "noww ", "uow", "windows", "boons", "been", "boost", "parameter", "exe", "ddang", "chayj", "tieengs ", "[password]as", "now"};
+            readonly string[] expected={"tiếng việt", "trường người", "as aa dd", "toán", "tiếng", "as", "á", "escape tiếng việt", "escape", "escape.á", "escape tiếng ", "hello.browser ", "github", "Địa chỉ: ", "dc", "ư", "ư ", "ơ", "ư", "ă", "nơ", "nơ ", "now ", "ươ", "windows", "bốn", "bên", "boost", "parameter", "exe", "đang", "chạy", "tiếng ", "as", "now"};
             int test,position,delay=8,focusRetries;
             internal IntegrationForm() {
                 Text="Telex Mini — automated input test";
                 StartPosition=FormStartPosition.CenterScreen;
                 TopMost=true;
                 Controls.Add(box);
+                Controls.Add(password);
                 var start=new Button { Text="Start input test", Dock=DockStyle.Top, Height=40 };
                 Controls.Add(start);
                 hook.InstallIntegrationSnippets(Productivity.ReadSnippetsFromText("dc\tĐịa chỉ:"));
                 start.Click+=delegate { start.Enabled=false; box.Focus(); LoadKeyboardLayout("00000409",1); timer.Start(); };
                 if(Environment.GetEnvironmentVariable("TELEX_AUTO_INTEGRATION")=="1")
                     Shown+=delegate {
+                        // Keep visible until an explicit UI click starts the
+                        // controlled test. Starting from Shown races initial
+                        // focus activation and can discard the first character.
                         TopMost=true;Activate();BringToFront();
-                        start.PerformClick();
                     };
                 timer.Tick+=Tick;
             }
@@ -734,29 +785,43 @@ namespace TelexMini
                     // Interactive Windows sessions may refuse initial focus
                     // while an automation client is foreground. Do not inject
                     // into any foreign window; retry activating our test form.
-                    if(focusRetries++<360) {
+                    if(focusRetries++<1350) {
                         TopMost=true;Activate();BringToFront();
                         Native.SetForegroundWindow(Handle);
                         return;
                     }
-                    Console.WriteLine("FAIL integration aborted: test window lost foreground after 16 seconds.");
+                    Console.WriteLine("FAIL integration aborted: test window lost foreground after 60 seconds.");
                     failures++; timer.Stop(); Close(); return;
                 }
                 focusRetries=0;
-                if(position<input[test].Length) {
-                    if(Environment.GetEnvironmentVariable("TELEX_TRACE")=="1") Console.WriteLine("TRACE "+position+" ["+box.Text+"]");
-                    char c=input[test][position++]; ushort vk=c=='\b' ? (ushort)8 : c=='\t' ? (ushort)9 : c==' ' ? (ushort)32 : c=='.' ? (ushort)0xBE : (ushort)char.ToUpperInvariant(c);
+                bool passwordTest=input[test].StartsWith("[password]",StringComparison.Ordinal);
+                string keys=passwordTest?input[test].Substring(10):input[test];
+                var target=passwordTest?password:box;
+                // Foreground HWND is not enough: a first physical key can
+                // be discarded while Windows shifts focus into the TextBox.
+                // Never inject until the exact intended control owns focus.
+                if(!target.Focused) {
+                    target.Focus(); delay=4;return;
+                }
+                if(position<keys.Length) {
+                    if(Environment.GetEnvironmentVariable("TELEX_TRACE")=="1")
+                        Console.WriteLine("TRACE "+position+" (characters omitted)");
+                    char c=keys[position++]; ushort vk=c=='\b' ? (ushort)8 : c=='\t' ? (ushort)9 : c==' ' ? (ushort)32 : c=='.' ? (ushort)0xBE : (ushort)char.ToUpperInvariant(c);
                     var down=Native.Key(vk,0,0); down.Data.Keyboard.Extra=UIntPtr.Zero;
                     var up=Native.Key(vk,0,2); up.Data.Keyboard.Extra=UIntPtr.Zero;
                     Native.SendInput(2,new[] { down,up },Marshal.SizeOf(typeof(Native.INPUT)));
                     delay=1; return;
                 }
-                Equal("Windows TextBox: "+input[test],expected[test],box.Text);
+                Equal("Windows "+(passwordTest?"PasswordBox":"TextBox")+": "+input[test],
+                    expected[test],passwordTest?password.Text:box.Text);
                 test++; position=0;
                 if(test==input.Length) { timer.Stop(); Close(); return; }
                 // Programmatic TextBox.Clear() is not a physical key event.
                 // Reset hook state explicitly between isolated test documents.
-                hook.Enabled=false; box.Clear(); hook.PreferEnglishExact=test==input.Length-1;
+                hook.Enabled=false; box.Clear(); password.Clear();
+                hook.PreferEnglishExact=test==input.Length-1;
+                if(input[test].StartsWith("[password]",StringComparison.Ordinal))password.Focus();
+                else box.Focus();
                 hook.Enabled=test!=5; delay=3;
             }
             protected override void Dispose(bool disposing) { if(disposing) { timer.Dispose(); hook.Dispose(); } base.Dispose(disposing); }

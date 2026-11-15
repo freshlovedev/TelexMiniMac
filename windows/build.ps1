@@ -1,8 +1,10 @@
-param([string]$OutputPath = "$PSScriptRoot\TelexMini.exe")
+param([string]$OutputPath = "$PSScriptRoot\TelexMini.exe", [switch]$SkipTests)
 $ErrorActionPreference = 'Stop'
-# Release guard: never replace the canonical EXE if the tests fail.
-& "$PSScriptRoot\test.ps1"
-if ($LASTEXITCODE -ne 0) { throw 'Tests failed; old TelexMini.exe is unchanged.' }
+# Tests are enabled by default. Explicit -SkipTests is for build-only requests.
+if (-not $SkipTests) {
+    & "$PSScriptRoot\test.ps1"
+    if ($LASTEXITCODE -ne 0) { throw 'Tests failed; old TelexMini.exe is unchanged.' }
+}
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) {
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
@@ -15,9 +17,11 @@ if (-not (Test-Path -LiteralPath $iconSource)) {
 $iconPath = Join-Path $env:TEMP ('TelexMini-AppIcon-' + [Guid]::NewGuid().ToString('N') + '.ico')
 if (-not (Test-Path -LiteralPath $iconSource)) { throw 'Missing TelexMini app icon source.' }
 & (Join-Path $PSScriptRoot 'make-icon.ps1') -SourcePath $iconSource -OutputPath $iconPath
-if ($LASTEXITCODE -ne 0) { throw 'App icon generation failed; old EXE is unchanged.' }
+if (-not (Test-Path -LiteralPath $iconPath) -or (Get-Item -LiteralPath $iconPath).Length -lt 22) {
+    throw 'App icon generation failed; old EXE is unchanged.'
+}
 try {
-& $compiler /nologo /target:winexe /platform:anycpu /optimize+ /utf8output "/win32icon:$iconPath" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/reference:$wpf\UIAutomationClient.dll" "/reference:$wpf\UIAutomationTypes.dll" "/reference:$wpf\WindowsBase.dll" "/out:$OutputPath" "$PSScriptRoot\UiText.cs" "$PSScriptRoot\Program.cs" "$PSScriptRoot\Keyboard.cs" "$PSScriptRoot\NativeComposer.cs" "$PSScriptRoot\ClipboardMacroSnapshot.cs" "$PSScriptRoot\ExpansionUndo.cs" "$PSScriptRoot\TextEditPlan.cs" "$PSScriptRoot\Productivity.cs" "$PSScriptRoot\ProductivitySettings.cs" "$PSScriptRoot\SpellAdvisor.cs" "$PSScriptRoot\ConfigSync.cs" "$PSScriptRoot\TelexEngine.cs" "$PSScriptRoot\EnglishLexicon.cs" "$PSScriptRoot\UserPreferences.cs" "$PSScriptRoot\ModernChrome.cs" "$PSScriptRoot\TrayMenuStyle.cs" "$PSScriptRoot\DictionaryEditor.cs" "$PSScriptRoot\AdvancedSettings.cs" "$PSScriptRoot\InputContext.cs"
+& $compiler /nologo /target:winexe /platform:anycpu /optimize+ /utf8output "/win32icon:$iconPath" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/reference:$wpf\UIAutomationClient.dll" "/reference:$wpf\UIAutomationTypes.dll" "/reference:$wpf\WindowsBase.dll" "/out:$OutputPath" "$PSScriptRoot\UiText.cs" "$PSScriptRoot\Program.cs" "$PSScriptRoot\StableRuntime.cs" "$PSScriptRoot\Keyboard.cs" "$PSScriptRoot\SmartTextFeatures.cs" "$PSScriptRoot\NativeComposer.cs" "$PSScriptRoot\ClipboardMacroSnapshot.cs" "$PSScriptRoot\ExpansionUndo.cs" "$PSScriptRoot\TextEditPlan.cs" "$PSScriptRoot\Productivity.cs" "$PSScriptRoot\ProductivitySettings.cs" "$PSScriptRoot\SpellAdvisor.cs" "$PSScriptRoot\ConfigSync.cs" "$PSScriptRoot\TelexEngine.cs" "$PSScriptRoot\EnglishLexicon.cs" "$PSScriptRoot\UserPreferences.cs" "$PSScriptRoot\ModernChrome.cs" "$PSScriptRoot\TrayMenuStyle.cs" "$PSScriptRoot\DictionaryEditor.cs" "$PSScriptRoot\AdvancedSettings.cs" "$PSScriptRoot\InputContext.cs"
 $compileExit = $LASTEXITCODE
 } finally {
     if (Test-Path -LiteralPath $iconPath) { Remove-Item -LiteralPath $iconPath -Force }

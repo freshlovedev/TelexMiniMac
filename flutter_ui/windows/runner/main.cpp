@@ -7,6 +7,20 @@
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // The tray is already singleton. The independent Flutter Settings process
+  // must also be singleton: simultaneous tray launches used to open two
+  // windows, consume memory and create extra taskbar entries.
+  HANDLE guard=CreateMutexW(nullptr,TRUE,L"Local\\TelexMini.SettingsUi.v1");
+  if(!guard)return EXIT_FAILURE;
+  if(GetLastError()==ERROR_ALREADY_EXISTS) {
+    HWND existing=FindWindowW(nullptr,L"TelexMini Settings");
+    if(existing) {
+      ShowWindow(existing,SW_RESTORE);
+      SetForegroundWindow(existing);
+    }
+    CloseHandle(guard);
+    return EXIT_SUCCESS;
+  }
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
@@ -26,8 +40,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Point origin(90, 75);
-  Win32Window::Size size(1080, 680);
+  Win32Window::Size size(980, 700);
   if (!window.Create(L"TelexMini Settings", origin, size)) {
+    ::CoUninitialize();
+    ReleaseMutex(guard);
+    CloseHandle(guard);
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
@@ -39,5 +56,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   ::CoUninitialize();
+  ReleaseMutex(guard);
+  CloseHandle(guard);
   return EXIT_SUCCESS;
 }

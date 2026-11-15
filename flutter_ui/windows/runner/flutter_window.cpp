@@ -1,6 +1,10 @@
 #include "flutter_window.h"
 
 #include <windows.h>
+#include <winnls.h>
+#include <commdlg.h>
+#pragma comment(lib, "Comdlg32.lib")
+#pragma comment(lib, "Normaliz.lib")
 #include <tlhelp32.h>
 #include <set>
 #include <sstream>
@@ -148,18 +152,26 @@ void SignalEngineReload() {
   WriteTextFile(L"dictionary-reload.flag", "reload\n");
 }
 
-void ApplyPreferences(const EncodableMap* map) {
+bool ApplyPreferences(const EncodableMap* map) {
+  // Apply all preferences in a single atomic preferences.ini replacement.
+  // Previously each property performed its own read/replace/write.
+  auto values = ReadSettings();
   const std::pair<const char*, const char*> booleans[] = {
       {"vietnameseEnabled", "VietnameseEnabled"},
       {"smartEnglish", "SmartEnglish"},
       {"restoreInvalid", "RestoreInvalid"},
       {"terminalEnglish", "AutoEnglish"},
       {"snippetsEnabled", "SnippetsEnabled"},
+      {"instantRepairEnabled", "InstantRepairEnabled"},
+      {"adaptiveLearningEnabled", "AdaptiveLearningEnabled"},
+      {"smartPunctuationEnabled", "SmartPunctuationEnabled"},
       {"profilesEnabled", "ProfilesEnabled"},
       {"autoStart", "AutoStart"},
   };
   for (const auto& item : booleans) {
-    if (auto value = ReadBool(map, item.first)) SetSetting(item.second, *value ? "true" : "false");
+    if (auto value = ReadBool(map, item.first)) {
+      values[item.second] = *value ? "true" : "false";
+    }
   }
   const std::pair<const char*, const char*> strings[] = {
       {"inputMethod", "InputMethod"},
@@ -168,14 +180,22 @@ void ApplyPreferences(const EncodableMap* map) {
       {"excludedApps", "ExcludedApps"},
   };
   for (const auto& item : strings) {
-    if (auto value = ReadString(map, item.first)) SetSetting(item.second, *value);
+    if (auto value = ReadString(map, item.first)) values[item.second] = *value;
   }
-  if (auto dark = ReadBool(map, "darkMode")) SetSetting("DarkTheme", *dark ? "true" : "false");
-  if (auto english = ReadBool(map, "englishUI")) SetSetting("UILanguage", *english ? "en" : "vi");
+  if (auto dark = ReadBool(map, "darkMode")) values["DarkTheme"] = *dark ? "true" : "false";
+  if (auto english = ReadBool(map, "englishUI")) values["UILanguage"] = *english ? "en" : "vi";
+  if (!WriteSettings(values)) return false;
   if (auto snippets = ReadString(map, "snippetText")) {
-    WriteTextFile(L"snippets.tsv", *snippets);
+    const auto snippetPath = DataDirectory() / L"snippets.tsv";
+    std::ifstream input(snippetPath, std::ios::binary);
+    const std::string current((std::istreambuf_iterator<char>(input)),
+                              std::istreambuf_iterator<char>());
+    if (current != *snippets) {
+      if (!WriteTextFile(L"snippets.tsv", *snippets)) return false;
+      SignalEngineReload();
+    }
   }
-  SignalEngineReload();
+  return true;
 }
 
 void HandleTelexMiniMethodCall(
@@ -184,6 +204,64 @@ void HandleTelexMiniMethodCall(
   const auto* arguments = call.arguments()
       ? std::get_if<EncodableMap>(call.arguments())
       : nullptr;
+  if (call.method_name() == "normalizeNfc") {
+    // Explicit request from Quick Text Tools. Does not read any text from
+    // other windows, clipboard, or keyboard hooks.
+    auto input=ReadString(arguments,"text");
+    if(!input || input->size()>240000) {
+      result->Error("INVALID_TEXT","Text is missing or exceeds the size limit.");
+      return;
+    }
+    if(input->empty()) {result->Success(EncodableValue(std::string()));return;}
+    const int units=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,
+            input->data(),static_cast<int>(input->size()),nullptr,0);
+    if(units<=0) {result->Error("INVALID_UTF8","Invalid text encoding.");return;}
+    std::wstring wide(static_cast<size_t>(units),L'\0');
+    if(MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,input->data(),
+          static_cast<int>(input->size()),wide.data(),units)!=units) {
+      result->Error("UTF8_ERROR","Cannot decode UTF-8.");return;
+    }
+    const int length=NormalizeString(NormalizationC,wide.data(),units,nullptr,0);
+    if(length<=0) {result->Error("NFC_ERROR","Windows normalization failed.");return;}
+    std::wstring nfc(static_cast<size_t>(length),L'\0');
+    const int actual=NormalizeString(NormalizationC,wide.data(),units,nfc.data(),length);
+    if(actual<=0) {result->Error("NFC_ERROR","Windows normalization failed.");return;}
+    nfc.resize(actual);
+    const int bytes=WideCharToMultiByte(CP_UTF8,0,nfc.data(),actual,nullptr,0,nullptr,nullptr);
+    if(bytes<=0) {result->Error("ENCODING_ERROR","Cannot encode UTF-8.");return;}
+    std::string utf8(static_cast<size_t>(bytes),'\0');
+    WideCharToMultiByte(CP_UTF8,0,nfc.data(),actual,utf8.data(),bytes,nullptr,nullptr);
+    result->Success(EncodableValue(std::move(utf8)));
+    return;
+  }
+  if (call.method_name() == "closeUi") {
+    result->Success(EncodableValue());
+    ::PostQuitMessage(0);  // Only Flutter UI exits; native tray engine remains.
+    return;
+  }
+  if (call.method_name() == "chooseExecutable") {
+    wchar_t selected[MAX_PATH] = {};
+    OPENFILENAMEW dialog = {};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = GetActiveWindow();
+    dialog.lpstrFile = selected;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrFilter = L"Windows executable (*.exe)\0*.exe\0All files (*.*)\0*.*\0";
+    dialog.nFilterIndex = 1;
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (GetOpenFileNameW(&dialog)) {
+      const auto name = std::filesystem::path(selected).filename().wstring();
+      const int len = WideCharToMultiByte(CP_UTF8, 0, name.c_str(),
+          static_cast<int>(name.size()), nullptr, 0, nullptr, nullptr);
+      if (len > 0) {
+        std::string filename(static_cast<size_t>(len), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, name.c_str(),
+            static_cast<int>(name.size()), filename.data(), len, nullptr, nullptr);
+        result->Success(EncodableValue(filename));
+      } else result->Success(EncodableValue());
+    } else result->Success(EncodableValue());
+    return;
+  }
   if (call.method_name() == "listProcesses") {
     EncodableList names;
     std::set<std::wstring> unique;
@@ -283,7 +361,10 @@ void HandleTelexMiniMethodCall(
       result->Error("BAD_ARGUMENT", "Expected a preferences map.");
       return;
     }
-    ApplyPreferences(arguments);
+    if (!ApplyPreferences(arguments)) {
+      result->Error("LOCAL_STORAGE", "Could not save native preferences.");
+      return;
+    }
     result->Success(EncodableValue());
     return;
   }

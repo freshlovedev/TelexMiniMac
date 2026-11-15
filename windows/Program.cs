@@ -19,6 +19,7 @@ namespace TelexMini
         readonly ToolStripMenuItem switchItem;
         readonly InputContextMonitor context;
         readonly System.Windows.Forms.Timer modeTimer;
+        readonly EventWaitHandle upgradeRequest;
         readonly CheckBox autoEnglish, restoreWords, smartEnglish;
         readonly GameGuard gameGuard;
         readonly ToolStripMenuItem pauseItem;
@@ -80,6 +81,9 @@ namespace TelexMini
             keyboard.PreferEnglishExact=UserPreferences.String("LanguagePriority","Balanced")=="English";
             keyboard.UseVni=UserPreferences.String("InputMethod","Telex")=="VNI";
             keyboard.SnippetsEnabled=UserPreferences.Bool("SnippetsEnabled",false);
+            keyboard.InstantRepairEnabled=UserPreferences.Bool("InstantRepairEnabled",true);
+            keyboard.AdaptiveLearningEnabled=UserPreferences.Bool("AdaptiveLearningEnabled",false);
+            keyboard.SmartPunctuationEnabled=UserPreferences.Bool("SmartPunctuationEnabled",false);
             keyboard.ProfilesEnabled=UserPreferences.Bool("ProfilesEnabled",false);
             keyboard.ReloadProductivity();
             autoEnglish.CheckedChanged+=delegate { keyboard.AutoEnglish=autoEnglish.Checked; UserPreferences.Set("AutoEnglish",autoEnglish.Checked); keyboard.Enabled=keyboard.Enabled; SyncPerformance(); UpdateMode(); };
@@ -107,7 +111,7 @@ namespace TelexMini
             TrayMenuStyle.Add(menu,UiText.T("Khôi phục hook bàn phím"),"↻",delegate(object s,EventArgs e) { RepairInputHooks(true); });
             TrayMenuStyle.Add(menu,UiText.T("Kiểm tra bản cập nhật..."),"↻",delegate(object s,EventArgs e) {
                 try {
-                    System.Diagnostics.Process.Start("https://github.com/muahacodon321-boop/TelexMiniMac/releases");
+                    System.Diagnostics.Process.Start("https://github.com/freshlovedev/TelexMiniMac/releases");
                 } catch(Exception ex) {
                     MessageBox.Show(this,ex.Message,"TelexMini",MessageBoxButtons.OK,MessageBoxIcon.Information);
                 }
@@ -130,9 +134,13 @@ namespace TelexMini
             keyboard.InjectionFailed+=delegate { BeginInvoke((Action)delegate { tray.ShowBalloonTip(3500,UiText.T("Không thay được ký tự"),UiText.T("Ứng dụng đích có thể đang chạy quyền quản trị. Xem HUONG-DAN.md."),ToolTipIcon.Info); }); };
             RegisterShortcut();
             lastExclusionPolicy=UserPreferences.String("ExcludedApps","");
+            upgradeRequest=new EventWaitHandle(false,EventResetMode.AutoReset,StableRuntime.UpgradeEventName);
             modeTimer=new System.Windows.Forms.Timer { Interval=800 };
             gameGuard=new GameGuard(delegate(bool active) { gameActive=active; SyncPerformance(); UpdateMode(); });
-            modeTimer.Tick+=delegate { RefreshExternalSettings(); gameGuard.Check(); UpdateMode(); ServeDiagnosticsRequest(); }; modeTimer.Start();
+            modeTimer.Tick+=delegate {
+                if(!cleaned && upgradeRequest.WaitOne(0)) { Close(); return; }
+                RefreshExternalSettings(); gameGuard.Check(); UpdateMode(); ServeDiagnosticsRequest();
+            }; modeTimer.Start();
             AttachRuntimeNotifications();
             if(!sharedUiInstalled)RebuildChrome();
             SyncPerformance();
@@ -211,6 +219,9 @@ namespace TelexMini
             try {
                 if(ProductivitySettings.Open(this)) {
                     keyboard.SnippetsEnabled=UserPreferences.Bool("SnippetsEnabled",false);
+                    keyboard.InstantRepairEnabled=UserPreferences.Bool("InstantRepairEnabled",true);
+                    keyboard.AdaptiveLearningEnabled=UserPreferences.Bool("AdaptiveLearningEnabled",false);
+                    keyboard.SmartPunctuationEnabled=UserPreferences.Bool("SmartPunctuationEnabled",false);
                     keyboard.ProfilesEnabled=UserPreferences.Bool("ProfilesEnabled",false);
                     keyboard.ReloadProductivity();
                 }
@@ -241,6 +252,9 @@ namespace TelexMini
                     RebuildChrome();
                     keyboard.UseVni=UserPreferences.String("InputMethod","Telex")=="VNI";
             keyboard.SnippetsEnabled=UserPreferences.Bool("SnippetsEnabled",false);
+            keyboard.InstantRepairEnabled=UserPreferences.Bool("InstantRepairEnabled",true);
+            keyboard.AdaptiveLearningEnabled=UserPreferences.Bool("AdaptiveLearningEnabled",false);
+            keyboard.SmartPunctuationEnabled=UserPreferences.Bool("SmartPunctuationEnabled",false);
             keyboard.ProfilesEnabled=UserPreferences.Bool("ProfilesEnabled",false);
                     string language=UserPreferences.String("LanguagePriority","Balanced");
                     keyboard.SmartEnglish=smartEnglish.Checked && language!="Vietnamese";
@@ -358,6 +372,9 @@ namespace TelexMini
                 keyboard.PreferEnglishExact=language=="English";
                 keyboard.UseVni=UserPreferences.String("InputMethod","Telex")=="VNI";
                 keyboard.SnippetsEnabled=UserPreferences.Bool("SnippetsEnabled",false);
+                keyboard.InstantRepairEnabled=UserPreferences.Bool("InstantRepairEnabled",true);
+                keyboard.AdaptiveLearningEnabled=UserPreferences.Bool("AdaptiveLearningEnabled",false);
+                keyboard.SmartPunctuationEnabled=UserPreferences.Bool("SmartPunctuationEnabled",false);
                 keyboard.ProfilesEnabled=UserPreferences.Bool("ProfilesEnabled",false);
                 keyboard.ReloadProductivity();
                 RegisterShortcut();
@@ -398,13 +415,9 @@ namespace TelexMini
                 (v ? Color.FromArgb(18,122,86) : Color.FromArgb(79,91,110));
             toggle.ForeColor=chrome!=null ? Color.FromArgb(9,79,75) : Color.White;
             tray.Icon=v ? vietIcon : englishIcon;
-            // Update both WM_GETICON slots explicitly: the small icon is used
-            // by the taskbar/title bar while the large icon is used by Alt+Tab.
-            Icon=AppIcons.Brand;
-            if(IsHandleCreated) {
-                Native.SendMessage(Handle,0x80,IntPtr.Zero,AppIcons.Brand.Handle);
-                Native.SendMessage(Handle,0x80,new IntPtr(1),tray.Icon.Handle);
-            }
+            // Keep the window/taskbar identity constant. Only the existing
+            // NotifyIcon switches V/E; never create another shell tray item
+            // or swap the HWND/taskbar icon on each language change.
             string reason=UiText.IsEnglish ?
                 (kind==InputContextKind.Password ? "Password field" : kind==InputContextKind.Terminal ? "Terminal" :
                  kind==InputContextKind.Unavailable ? "Input field not detected" : "Detecting input field") :
@@ -439,6 +452,7 @@ namespace TelexMini
                 if(foregroundEventHook!=IntPtr.Zero)Native.UnhookWinEvent(foregroundEventHook);
                 if(focusEventHook!=IntPtr.Zero)Native.UnhookWinEvent(focusEventHook);
                 if(modeTimer!=null) modeTimer.Dispose();
+                if(upgradeRequest!=null)upgradeRequest.Dispose();
                 if(gameGuard!=null) gameGuard.Dispose();
                 if(keyboard!=null) keyboard.Dispose();
                 if(context!=null) context.Dispose();
@@ -495,6 +509,10 @@ namespace TelexMini
     {
         [STAThread] static void Main()
         {
+            StableRuntime.SetShellIdentity();
+            // A new ZIP/build path must launch through one stable user-local
+            // install location, BEFORE creating any NotifyIcon or HWND.
+            if(StableRuntime.RedirectIfNeeded()) return;
             bool first;
             using(var mutex=new Mutex(true,"Local\\TelexMini.Portable.v1",out first))
             {

@@ -69,16 +69,16 @@ void main() {
     await tester.pumpWidget(TelexMiniApp(controller: controller));
     await tester.pump(const Duration(milliseconds: 250));
 
-    expect(find.text('telexmini'), findsOneWidget);
-    expect(find.text('Gõ theo cách của bạn.'), findsOneWidget);
-    expect(find.text('TÙY CHỈNH TRẢI NGHIỆM'), findsOneWidget);
-    expect(find.text('THỬ GÕ NGAY'), findsOneWidget);
-    expect(find.text('Từ điển Anh'), findsOneWidget);
+    expect(find.text('TelexMini'), findsOneWidget);
+    expect(find.text('Chào mừng đến với TelexMini'), findsOneWidget);
+    expect(find.text('Tùy chỉnh trải nghiệm'), findsOneWidget);
+    expect(find.text('Thử gõ ngay'), findsOneWidget);
+    expect(find.text('Từ điển Anh'), findsWidgets);
   });
 
-  testWidgets('1080x680 desktop layout has no overflow and uses custom icon', (tester) async {
+  testWidgets('980x700 desktop layout has no overflow and uses custom icon', (tester) async {
     final controller = makeIsolatedController();
-    tester.view.physicalSize = const Size(1080, 680);
+    tester.view.physicalSize = const Size(980, 700);
     tester.view.devicePixelRatio = 1;
     addTearDown(() {
       tester.view.resetPhysicalSize();
@@ -92,7 +92,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('compact layout exposes responsive navigation', (tester) async {
+  testWidgets('narrow desktop layout uses responsive navigation', (tester) async {
     final controller = makeIsolatedController();
     tester.view.physicalSize = const Size(760, 900);
     tester.view.devicePixelRatio = 1;
@@ -104,7 +104,8 @@ void main() {
     await tester.runAsync(() => controller.load());
     await tester.pumpWidget(TelexMiniApp(controller: controller));
     await tester.pump(const Duration(milliseconds: 250));
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(Sidebar), findsNothing);
+    expect(find.byKey(const Key('compact-navigation')), findsOneWidget);
   });
 
   testWidgets('V/E mode switch updates UI and native bridge', (tester) async {
@@ -123,12 +124,12 @@ void main() {
     await tester.pumpWidget(TelexMiniApp(controller: controller));
     await tester.pump(const Duration(milliseconds: 250));
 
-    expect(find.textContaining('TIẾNG VIỆT'), findsOneWidget);
-    await tester.tap(find.textContaining('TIẾNG VIỆT'));
+    expect(find.text('Tiếng Việt'), findsWidgets);
+    await tester.tap(find.text('English').first);
     await tester.pump(const Duration(milliseconds: 250));
 
     expect(controller.vietnameseEnabled, isFalse);
-    expect(find.textContaining('TIẾNG ANH'), findsOneWidget);
+    expect(find.text('English'), findsWidgets);
     expect(calls.any((call) => call.method == 'setMode'), isTrue);
     await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 150)));
     expect(calls.any((call) => call.method == 'applyPreferences'), isTrue);
@@ -149,7 +150,7 @@ void main() {
     await tester.runAsync(() => controller.load());
     await tester.pumpWidget(TelexMiniApp(controller: controller));
     await tester.pump(const Duration(milliseconds: 250));
-    await tester.tap(find.text('Từ điển Anh'));
+    await tester.tap(find.text('Từ điển Anh').first);
     await tester.pump(const Duration(milliseconds: 250));
 
     expect(find.text('Chưa có từ tùy chỉnh'), findsOneWidget);
@@ -159,13 +160,13 @@ void main() {
     await tester.tap(find.text('Thêm').last);
     await tester.pump(const Duration(milliseconds: 250));
 
-    expect(find.text('parameter'), findsOneWidget);
+    expect(find.descendant(of: find.byType(ListTile), matching: find.text('parameter')), findsOneWidget);
     await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 150)));
     expect(calls.any((call) => call.method == 'saveDictionary'), isTrue);
 
     await tester.tap(find.byTooltip('Xóa từ'));
     await tester.pump(const Duration(milliseconds: 250));
-    expect(find.text('parameter'), findsNothing);
+    expect(find.descendant(of: find.byType(ListTile), matching: find.text('parameter')), findsNothing);
     await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 150)));
     expect(calls.where((call) => call.method == 'saveDictionary').length, 2);
   });
@@ -186,21 +187,15 @@ void main() {
     await tester.pump(const Duration(milliseconds: 350));
     await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 150)));
     await tester.pump(const Duration(milliseconds: 350));
-    if (Platform.isLinux) {
-      // Linux adapter does not expose per-process exclusions yet. Verify the
-      // integrated page's accurate unsupported state rather than expecting
-      // Windows-only task names and interactive per-process controls.
-      expect(find.text('Chưa hỗ trợ chọn process trên Linux.'), findsOneWidget);
-      expect(find.byType(CheckboxListTile), findsNothing);
-    } else {
-      expect(find.text('notepad.exe'), findsOneWidget);
-      expect(find.text('explorer.exe'), findsOneWidget);
-      await tester.tap(find.byType(CheckboxListTile).first);
-      await tester.pump(const Duration(milliseconds: 350));
-      expect(controller.excludedApps.isNotEmpty, isTrue);
-      expect(calls.any((call) => call.method == 'applyPreferences'), isTrue);
-    }
+    await tester.tap(find.text('Process đang chạy'));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('notepad.exe'), findsOneWidget);
+    expect(find.text('explorer.exe'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await tester.tap(find.byType(Checkbox).first);
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(controller.excludedApps.isNotEmpty, isTrue);
+    expect(calls.any((call) => call.method == 'applyPreferences'), isTrue);
   });
 
   testWidgets('per-app profile persists via native channel', (tester) async {
@@ -238,13 +233,66 @@ void main() {
     await tester.runAsync(() => controller.load());
     await tester.pumpWidget(TelexMiniApp(controller: controller));
     await tester.pump(const Duration(milliseconds: 250));
-    expect(find.textContaining('TIẾNG VIỆT'), findsOneWidget);
+    expect(find.text('Tiếng Việt'), findsWidgets);
 
     nativeVietnamese = false;
     await controller.refreshNativeMode();
     await tester.pump(const Duration(milliseconds: 250));
-    expect(find.textContaining('TIẾNG ANH'), findsOneWidget);
+    expect(find.text('English'), findsWidgets);
     expect(controller.nativeConnected, isTrue);
+  });
+
+  testWidgets('snippets are managed as visible list rows, never a multiline editor', (tester) async {
+    final calls = <MethodCall>[];
+    _installMockBridge(calls);
+    addTearDown(_removeMockBridge);
+    final c = makeIsolatedController();
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    await tester.runAsync(() => c.load());
+    await tester.pumpWidget(TelexMiniApp(controller: c));
+    await c.setPage(AppPage.snippets);
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(find.text('Danh sách gõ tắt'), findsOneWidget);
+    await tester.tap(find.text('Thêm gõ tắt'));
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.enterText(find.byType(TextField).at(1), 'dc');
+    await tester.enterText(find.byType(TextField).at(2), 'Địa chỉ:');
+    await tester.tap(find.text('Lưu').last);
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(c.snippetText, contains('dc\tĐịa chỉ:'));
+    expect(find.text('dc'), findsOneWidget);
+    expect(find.text('Địa chỉ:'), findsOneWidget);
+    expect(find.byTooltip('Sửa'), findsOneWidget);
+    expect(find.byTooltip('Xóa'), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
+  });
+
+  testWidgets('diagnostics is accessible in shared UI, compact sidebar toggles', (tester) async {
+    final calls = <MethodCall>[];
+    _installMockBridge(calls);
+    addTearDown(_removeMockBridge);
+    final c = makeIsolatedController();
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    await tester.runAsync(() => c.load());
+    await tester.pumpWidget(TelexMiniApp(controller:c));
+    await c.setPage(AppPage.diagnostics);
+    await tester.pump(const Duration(milliseconds:250));
+    expect(find.text('Input Diagnostics'),findsOneWidget);
+    expect(find.text('Sao lưu & Khôi phục'),findsOneWidget);
+    await tester.tap(find.byTooltip('Thu gọn/mở rộng sidebar'));
+    await tester.pump(const Duration(milliseconds:250));
+    expect(c.compactSidebar,isTrue);
+    expect(tester.takeException(),isNull);
   });
 
 }
