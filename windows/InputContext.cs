@@ -100,16 +100,18 @@ namespace TelexMini
         internal sealed class Snapshot {
             internal readonly IntPtr Window, Focus;
             internal readonly InputContextKind Kind;
+            internal readonly uint ProcessId;
             internal readonly int Revision, Tick;
-            internal Snapshot(IntPtr window, IntPtr focus, InputContextKind kind, int revision) {
-                Window=window; Focus=focus; Kind=kind; Revision=revision; Tick=Environment.TickCount;
+            internal Snapshot(IntPtr window, IntPtr focus, uint processId, InputContextKind kind, int revision) {
+                Window=window; Focus=focus; ProcessId=processId;
+                Kind=kind; Revision=revision; Tick=Environment.TickCount;
             }
         }
         readonly AutoResetEvent wake=new AutoResetEvent(false);
         readonly Thread worker;
         volatile bool stopped;
         volatile bool enabled;
-        volatile Snapshot current=new Snapshot(IntPtr.Zero,IntPtr.Zero,InputContextKind.Checking,0);
+        volatile Snapshot current=new Snapshot(IntPtr.Zero,IntPtr.Zero,0,InputContextKind.Checking,0);
         int revision;
         int accessibilityQueries;
         internal int AccessibilityQueries { get { return Volatile.Read(ref accessibilityQueries); } }
@@ -124,18 +126,38 @@ namespace TelexMini
         internal Snapshot Current { get { return current; } }
         internal bool Enabled {
             get { return enabled; }
-            set { if(enabled==value) return; enabled=value; Interlocked.Increment(ref revision); wake.Set(); }
+            // Keep the monitor alive in manual English mode. A V/E toggle then
+            // reuses the exact focused-control classification without waiting for UIA.
+            // Disabling only for a game/remote pause invalidates the old snapshot.
+            set {
+                if(enabled==value) return;
+                enabled=value;
+                Interlocked.Increment(ref revision);
+                wake.Set();
+            }
         }
         internal void RequestCheck() {
             if(stopped || !enabled) return;
             Interlocked.Increment(ref revision);
             wake.Set();
         }
+        internal static bool SnapshotMatches(Snapshot snapshot,IntPtr window,IntPtr focus,uint processId) {
+            return snapshot!=null && snapshot.Window==window &&
+                snapshot.Focus==focus && snapshot.ProcessId==processId;
+        }
+        internal static bool SnapshotMatches(Snapshot snapshot,IntPtr window,IntPtr focus,
+                                             uint processId,int currentRevision) {
+            return SnapshotMatches(snapshot,window,focus,processId) &&
+                snapshot.Revision==currentRevision;
+        }
         internal InputContextKind GetKind(IntPtr window,IntPtr focus) {
-            Snapshot s=current;
-            if(s.Window!=window || s.Focus!=focus || s.Revision!=Volatile.Read(ref revision) ||
-                unchecked((uint)(Environment.TickCount-s.Tick))>2000) return InputContextKind.Checking;
-            return s.Kind;
+            uint processId=0;
+            GetWindowThreadProcessId(window,out processId);
+            Snapshot snapshot=current;
+            // Reuse metadata for the same exact control. A new control/window
+            // still fails closed until the background password check finishes.
+            return SnapshotMatches(snapshot,window,focus,processId,Volatile.Read(ref revision))
+                ? snapshot.Kind : InputContextKind.Checking;
         }
         internal static IntPtr FocusOf(IntPtr window) {
             if(window==IntPtr.Zero) return IntPtr.Zero;
@@ -157,9 +179,12 @@ namespace TelexMini
             if(!enabled || stopped) return;
             int version=Volatile.Read(ref revision);
             IntPtr window=Native.GetForegroundWindow(), focus=FocusOf(window);
+            uint pid=0; GetWindowThreadProcessId(window,out pid);
+            Snapshot cached=current;
+            // Avoid re-querying UI Automation every 750 ms for an unchanged field.
+            if(SnapshotMatches(cached,window,focus,pid,version)) return;
             InputContextKind kind=InputContextKind.Unavailable;
             try {
-                uint pid; GetWindowThreadProcessId(window,out pid);
                 if(pid!=lastProcess) {
                     using(var process=Process.GetProcessById((int)pid)) processName=process.ProcessName;
                     lastProcess=pid;
@@ -182,7 +207,7 @@ namespace TelexMini
               catch(COMException) { }
               catch(UnauthorizedAccessException) { }
             if(enabled && !stopped && version==Volatile.Read(ref revision) && window==Native.GetForegroundWindow() && focus==FocusOf(window))
-                current=new Snapshot(window,focus,kind,version);
+                current=new Snapshot(window,focus,pid,kind,version);
         }
         void Run() {
             bool subscribed=false;
@@ -202,7 +227,7 @@ namespace TelexMini
                         try { Automation.AddAutomationFocusChangedEventHandler(focusHandler); subscribed=true; }
                         catch(COMException) { } catch(InvalidOperationException) { }
                     }
-                    Refresh(); wake.WaitOne(750);
+                    Refresh(); wake.WaitOne(150);
                 }
             } finally {
                 if(subscribed) {

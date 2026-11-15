@@ -1,68 +1,83 @@
-# TelexMini — Windows + macOS source monorepo
+# TelexMini — shared Flutter desktop UI + native input engines
 
-TelexMini is a lightweight Vietnamese Telex input utility with an offline English lexicon and local-only settings. **This repository includes the source for both Windows and macOS.** It does not include compiler outputs, credentials, local user dictionaries or binaries.
+TelexMini is a local-first Vietnamese/English input utility. The desktop settings and dashboard are being consolidated into **one Flutter application** for Windows, macOS and Linux. The system-wide input engine remains native on each operating system so keyboard hooks, password-field safety, menu-bar/tray integration and input-method APIs are not forced through Flutter.
+
+## Architecture
+
+- **Shared Flutter UI:** dashboard, V/E mode, dictionaries, snippets, quick symbols, preferences, light/dark theme and Vietnamese/English interface.
+- **Windows native engine:** existing C# keyboard hook and Telex/VNI core. The Flutter Windows runner writes the same local preferences and dictionary files; the C# host detects changes and applies them live.
+- **macOS native engine:** existing InputMethodKit source. The Flutter macOS settings app uses a native method channel to share V/E state, preferences and user dictionaries with the IMK engine.
+- **Linux target:** Flutter Linux runner and local settings bridge are scaffolded. A native Fcitx5 input-method engine is still required before Linux can be called a supported system-wide input method.
+
+See [docs/SHARED_UI_ARCHITECTURE.md](docs/SHARED_UI_ARCHITECTURE.md) for the method-channel contract, platform status and release gates.
 
 ## Repository layout
 
 ```text
 TelexMiniMac/
-  .gitignore
-  README.md                  <- this document
-  MACOS-README.md            <- Mac build, install and known limitations
-  Sources/
-    TelexComposer.swift      <- native macOS engine
-    InputMain.swift          <- InputMethodKit input source
-    SettingsMain.swift       <- native SwiftUI preferences app
-  Resources/
-    english-core.txt         <- bundled offline public lexicon
-    Input-Info.plist
-    Settings-Info.plist
-  Tests/
-    EngineTests.swift
-  tools/
-    build.sh                 <- builds two native macOS apps, icon and tests
-    MakeIcon.swift
-  windows/
-    Program.cs               <- WinForms entry + tray, options
-    ModernChrome.cs          <- Windows modern UI
-    Keyboard.cs              <- Windows keyboard integration
-    InputContext.cs          <- password field/context detection
-    TelexEngine.cs           <- Windows Telex engine
-    EnglishLexicon.cs        <- offline lexicon + user overrides
-    UserPreferences.cs       <- local settings
-    Tests.cs
-    build.ps1
-    test.ps1
-    HUONG-DAN.md
-    COMMERCIAL-ROADMAP.md
+  Sources/                         # Native macOS InputMethodKit engine
+  Resources/                       # Shared lexicon and brand assets
+  Tests/                           # macOS composer regression suite
+  windows/                         # Native Windows C# input engine and tests
+  flutter_ui/                      # Shared Flutter UI + macOS/Windows/Linux runners
+  docs/SHARED_UI_ARCHITECTURE.md    # Cross-platform architecture and current status
+  tools/build.sh                   # Native macOS engine + Flutter Settings package
+  tools/build-flutter-ui.sh        # Flutter macOS UI build
+  tools/build-flutter-ui.ps1       # Flutter Windows UI build/package
+  tools/build-flutter-ui-linux.sh  # Flutter Linux UI build/package
+  tools/package-macos.sh           # macOS ZIP packaging and verification
 ```
 
-## Windows (Windows 10/11, .NET Framework 4.x)
+## Build
 
-From PowerShell inside `windows/`:
+### macOS
+
+Requires Flutter, Xcode and Swift 5. From the repository root:
+
+```bash
+flutter --version
+bash tools/build.sh
+```
+
+This runs the native Telex/VNI regression suite, Flutter analysis and widget tests, then builds:
+- `build/TelexMini.app` — native universal InputMethodKit engine for arm64/x86_64 (approximately 1.9 MB on the current build host).
+- `build/TelexMini Settings.app` — shared Flutter settings UI (approximately 42 MB on the current build host).
+
+The settings app's method channel is connected to the native IMK engine. Both macOS executables contain arm64 and x86_64 slices. Run `bash tools/package-macos.sh` to create the roughly 21 MB macOS ZIP. These are locally ad-hoc signed builds; public distribution still needs Developer ID signing and notarization.
+
+### Windows
+
+The existing native engine can still be built and tested with the current scripts:
 
 ```powershell
+cd windows
 powershell -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-Build output: `windows/TelexMini.exe` (ignored by Git). The build **overwrites this one canonical executable** instead of creating version-suffixed filenames. Close any running `TelexMini.exe` before rebuilding. Only run one TelexMini instance. The program uses native Windows APIs, so it must be compiled and tested on a Windows machine. A verified previous build exists on the development PC; the bundled copy of source was made from that project.
+To build the integrated Windows release, install Flutter and Visual Studio C++ desktop build tools, then run from the `windows` folder:
 
-## macOS (Swift 5 mode, Xcode)
-
-From this repository's parent directory (or adjust the script path):
-
-```bash
-bash TelexMiniMac/tools/build.sh
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\\build-flutter-distribution.ps1
 ```
 
-Build outputs: `build/TelexMini.app` and `build/TelexMini Settings.app` (ignored by Git). The system input method uses InputMethodKit and the preferences app uses SwiftUI. Both build on Apple Silicon. See [MACOS-README.md](MACOS-README.md) for manual install, setup, tested scope and release blockers.
+The release contains the existing native `TelexMini.exe` input engine and the shared `TelexMiniSettings.exe` Flutter UI. **Start `TelexMini.exe`**: the engine remains in the system tray and automatically opens the Flutter dashboard. Relaunching the native EXE reopens the dashboard without creating a second input engine. Without the co-located Flutter bundle, the native WinForms dashboard remains a fallback.
 
-**macOS is a technical preview, not a commercial release.** Unit tests and builds pass, but first-time input-source activation and typing across apps still need end-to-end verification after logging out/in. The default ad-hoc signature is suitable only for local testing.
+The release was compiled and visually inspected on Windows 11. The 4,700-case Telex/VNI oracle, Flutter analysis, five widget tests, one-instance reopening, and live native V/E bridge tests passed. The packaged folder measured roughly **27.1 MB**, and the **11.3 MB ZIP** is available at `windows/build/TelexMini-Windows-x64.zip`. After starting the integrated package, `windows/test-flutter-bridge.ps1` verifies V/E changes and restores original preferences byte-for-byte.
 
-## Windows settings and dictionary UI
+### Linux
 
-The WinForms dashboard uses an explicit two-column layout so the sidebar cannot overlap the content. The light/dark palette has readable button labels, an accent-mode switch, and an in-app typing preview. Both **English dictionary** and **Vietnamese Telex preference** menus open native searchable add/edit/remove dialogs directly in TelexMini (no Notepad). Changes are applied when saved, and user files are kept in `%LOCALAPPDATA%\\TelexMini`; older portable TXT files beside the EXE remain readable.
+The Flutter Linux UI target is scaffolded. On a Linux desktop with Flutter and the GTK development dependencies installed:
+
+```bash
+bash tools/build-flutter-ui-linux.sh
+```
+
+This builds the settings UI only. **System-wide Linux typing is not implemented yet.** The planned native adapter is a Fcitx5 engine for X11 and Wayland; it must port and pass the full Telex/VNI regression corpus and be tested on real GNOME/KDE desktops before release.
+
+## Windows settings and dictionary bridge
+
+The C# input engine reads settings from `%LOCALAPPDATA%\\TelexMini`, detects Flutter-written preference changes and applies V/E mode, Telex/VNI, language priority, productivity flags and auto-start without restarting. The Flutter dashboard polls native V/E mode every 450 ms while open, so hotkey changes are reflected without multi-second UI delays. The native fallback interface appears only when the co-located Flutter UI cannot launch.
 
 ## English typing reliability
 
@@ -162,7 +177,7 @@ output; they do not substitute for end-to-end host-application typing tests.
 
 ## Typing Engine v3 and advanced settings
 
-Both platforms support Telex (default) and optional VNI (1-5 tone, 6/7/8 vowel shapes, 9 for đ). Select the input method and language priority (Balanced by default, Vietnamese-first or English-first) in advanced preferences. Windows exposes an in-app advanced settings window with configurable V/E shortcut presets, auto-start, exact process exclusion list, and local import/export. macOS offers SwiftUI controls for Telex/VNI, source-local V/E shortcuts, exact bundle ID exclusions, login-item startup and dictionary editing in-app. The macOS login item starts the Settings app; enabling the IMK input source is a separate system choice.
+The Windows and macOS native engines support Telex (default) and optional VNI (1-5 tone, 6/7/8 vowel shapes, 9 for đ). The shared Flutter settings UI exposes input method, language priority (Balanced by default, Vietnamese-first or English-first), V/E shortcut, dictionaries, snippets and per-app profile controls where the native engine supports them. Linux will receive the same UI, but its Fcitx5 composition engine is still pending.
 
 Regression coverage now includes 3,000 deterministic random compositions per platform, VNI numeric identifiers, Telex immediate accents, repeated escape keys and Backspace. **This does not establish application-level compatibility.** See [QA-RESULTS.md](QA-RESULTS.md) for tested behavior and outstanding Windows-focus / macOS-input-registration blockers.
 

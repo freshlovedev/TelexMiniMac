@@ -22,6 +22,9 @@ final class TelexInputController: IMKInputController {
         let defaults=UserDefaults(suiteName:"com.telexmini.mac") ?? .standard
         snippetsEnabled=defaults.bool(forKey:"snippetsEnabled")
         profilesEnabled=defaults.bool(forKey:"profilesEnabled")
+        if let sharedMode=defaults.object(forKey:"vietnameseEnabled") as? Bool {
+            vietnameseEnabled=sharedMode
+        }
         if Date().timeIntervalSince(productivityLastChecked)>2 {
             productivityLastChecked=Date()
             let paths=["snippets.tsv","profiles.tsv"].map {ProductivityCore.folder.appendingPathComponent($0)}
@@ -94,7 +97,11 @@ final class TelexInputController: IMKInputController {
                    (shortcut=="Ctrl + Option + V" && event.keyCode==9 &&
                     modifiers.contains(.control) && modifiers.contains(.option))
         if toggle {
-            finish(sender);vietnameseEnabled.toggle();return true
+            finish(sender)
+            vietnameseEnabled.toggle()
+            (UserDefaults(suiteName:"com.telexmini.mac") ?? .standard)
+                .set(vietnameseEnabled,forKey:"vietnameseEnabled")
+            return true
         }
         if !vietnameseEnabled || profileMode=="English" {finish(sender);return false}
         // Secure fields are normally handled by the system's Roman input source.
@@ -130,7 +137,8 @@ final class TelexInputController: IMKInputController {
 
     override func activateServer(_ sender: Any!) {
         composer.reset()
-        vietnameseEnabled=true
+        vietnameseEnabled=(UserDefaults(suiteName:"com.telexmini.mac") ?? .standard)
+            .object(forKey:"vietnameseEnabled") as? Bool ?? true
         TelexComposer.reloadLexicon()
         preferences()
     }

@@ -14,9 +14,9 @@ namespace TelexMini
             return portable?Path.Combine(exeDirectory,"Data"):Path.Combine(localDirectory,"TelexMini");
         }
         internal static string DirectoryPath {
-            get {return ResolveDirectory(ExeDirectory,
+            get { return ResolveDirectory(ExeDirectory,
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                IsPortable);}
+                IsPortable); }
         }
         internal static void EnablePortable() {
             string dest=Path.Combine(ExeDirectory,"Data");
@@ -40,51 +40,85 @@ namespace TelexMini
             File.Delete(Path.Combine(ExeDirectory,"portable.flag"));
         }
     }
+
     // User settings only. No keystrokes, text history, or passwords are written to disk.
+    // Flutter's Windows runner updates this same file; the native input engine
+    // notices the atomic replacement and applies the new settings without restart.
     internal static class UserPreferences
     {
-        static readonly Dictionary<string,string> values = Load();
+        static readonly object gate=new object();
+        static readonly Dictionary<string,string> values=Load();
+        static DateTime lastWriteUtc=FileStamp();
+
         internal static string FilePath {
             get { return Path.Combine(AppStorage.DirectoryPath,"preferences.ini"); }
         }
+        static DateTime FileStamp() {
+            try {return File.Exists(FilePath)?File.GetLastWriteTimeUtc(FilePath):DateTime.MinValue;}
+            catch(Exception) {return DateTime.MinValue;}
+        }
         static Dictionary<string,string> Load() {
-            var v = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+            var v=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
             try {
                 if(File.Exists(FilePath)) foreach(string line in File.ReadAllLines(FilePath,Encoding.UTF8)) {
                     int index=line.IndexOf('=');
-                    if(index>0) v[line.Substring(0,index).Trim()] = line.Substring(index+1).Trim();
+                    if(index>0) v[line.Substring(0,index).Trim()]=line.Substring(index+1).Trim();
                 }
             } catch(IOException) {} catch(UnauthorizedAccessException) {}
             return v;
         }
+        internal static bool ReloadIfChanged() {
+            DateTime stamp=FileStamp();
+            lock(gate) if(stamp==lastWriteUtc)return false;
+            var fresh=Load();
+            lock(gate) {
+                values.Clear();
+                foreach(var entry in fresh)values[entry.Key]=entry.Value;
+                lastWriteUtc=stamp;
+            }
+            return true;
+        }
         internal static bool Bool(string key,bool fallback) {
-            string v;
-            return values.TryGetValue(key,out v) ? (v=="true" ? true : v=="false" ? false : fallback) : fallback;
+            lock(gate) {
+                string value;
+                return values.TryGetValue(key,out value) ?
+                    (value=="true"?true:value=="false"?false:fallback) : fallback;
+            }
         }
         internal static string String(string key,string fallback) {
-            string value;
-            return values.TryGetValue(key,out value) ? value : fallback;
+            lock(gate) {
+                string value;
+                return values.TryGetValue(key,out value)?value:fallback;
+            }
         }
-        internal static void Set(string key,bool value) { Set(key,value ? "true" : "false"); }
+        internal static void Set(string key,bool value) {Set(key,value?"true":"false");}
         internal static void Set(string key,string value) {
-            values[key] = value ?? "";
+            lock(gate) values[key]=value??"";
             Save();
         }
         internal static void Reload() {
-            values.Clear();
-            foreach(var entry in Load()) values[entry.Key]=entry.Value;
+            var fresh=Load();
+            lock(gate) {
+                values.Clear();
+                foreach(var entry in fresh)values[entry.Key]=entry.Value;
+                lastWriteUtc=FileStamp();
+            }
         }
         static void Save() {
             try {
                 string folder=Path.GetDirectoryName(FilePath);
                 Directory.CreateDirectory(folder);
-                var rows=new List<string>();
-                foreach(var item in values) rows.Add(item.Key+"="+item.Value);
-                // Atomic replacement when possible and safe fallback on first write.
+                string[] rows;
+                lock(gate) {
+                    var list=new List<string>();
+                    foreach(var item in values)list.Add(item.Key+"="+item.Value);
+                    rows=list.ToArray();
+                }
                 string temp=FilePath+".tmp";
-                File.WriteAllLines(temp,rows.ToArray(),new UTF8Encoding(false));
-                if(File.Exists(FilePath)) File.Replace(temp,FilePath,null);
+                File.WriteAllLines(temp,rows,new UTF8Encoding(false));
+                if(File.Exists(FilePath))File.Replace(temp,FilePath,null);
                 else File.Move(temp,FilePath);
+                lock(gate)lastWriteUtc=FileStamp();
             } catch(IOException) {} catch(UnauthorizedAccessException) {} catch(PlatformNotSupportedException) {}
         }
     }

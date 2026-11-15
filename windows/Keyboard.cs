@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace TelexMini
 {
@@ -24,6 +25,32 @@ namespace TelexMini
         [DllImport("user32.dll")] internal static extern bool RegisterHotKey(IntPtr window, int id, uint mods, uint key);
         [DllImport("user32.dll")] internal static extern bool UnregisterHotKey(IntPtr window, int id);
         [DllImport("user32.dll")] internal static extern bool DestroyIcon(IntPtr icon);
+        [DllImport("user32.dll")] internal static extern bool ShowWindow(IntPtr window,int command);
+        [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr window);
+        [DllImport("user32.dll",CharSet=CharSet.Auto)]
+        internal static extern IntPtr SendMessage(IntPtr window,int message,IntPtr wParam,IntPtr lParam);
+        internal delegate bool EnumWindowsProc(IntPtr window,IntPtr parameter);
+        [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc callback,IntPtr parameter);
+        [DllImport("user32.dll",EntryPoint="GetWindowThreadProcessId")]
+        static extern uint GetWindowThreadProcessIdForWindow(IntPtr window,out uint processId);
+        [DllImport("user32.dll",CharSet=CharSet.Unicode)]
+        static extern int GetWindowText(IntPtr window,StringBuilder text,int maxCount);
+        [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window,uint command);
+        internal static IntPtr FindTopLevelWindowForProcess(int processId) {
+            IntPtr found=IntPtr.Zero;
+            EnumWindows(delegate(IntPtr window,IntPtr parameter) {
+                uint pid=0;GetWindowThreadProcessIdForWindow(window,out pid);
+                if(pid!=(uint)processId || GetWindow(window,4)!=IntPtr.Zero) return true;
+                var title=new StringBuilder(256);
+                GetWindowText(window,title,title.Capacity);
+                if(title.ToString().IndexOf("TelexMini",StringComparison.OrdinalIgnoreCase)>=0) {
+                    found=window;return false;
+                }
+                if(found==IntPtr.Zero) found=window;
+                return true;
+            },IntPtr.Zero);
+            return found;
+        }
         [StructLayout(LayoutKind.Sequential)] internal struct Point { public int X,Y; }
         [StructLayout(LayoutKind.Sequential)] internal struct Rect { public int L,T,R,B; }
         [StructLayout(LayoutKind.Sequential)] internal struct GUIInfo {
@@ -121,7 +148,13 @@ namespace TelexMini
         internal bool EffectiveEnabled { get { return ContextPolicy.UseVietnamese(enabled,AutoEnglish,ContextKind) && activeProfile!="English"; } }
         internal bool AcceptTestInput = false;
         internal event Action InjectionFailed;
-        internal bool Enabled { get { return enabled; } set { enabled=value; engine.Reset(); UpdateHooks(); } }
+        internal bool Enabled {
+            get {return enabled;}
+            set {
+                if(enabled==value)return;
+                enabled=value;engine.Reset();UpdateHooks();
+            }
+        }
         internal bool Suspended { get { return suspended; } set { if(suspended==value) return; suspended=value; engine.Reset(); UpdateHooks(); } }
         internal bool HooksInstalled { get { return keyHook!=IntPtr.Zero || mouseHook!=IntPtr.Zero; } }
         internal Keyboard(InputContextMonitor monitor=null)

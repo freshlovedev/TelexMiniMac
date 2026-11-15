@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=TelexMini
+Comment=Smart bilingual Vietnamese and English input
+Exec=telexmini
+Icon=telexmini
+Terminal=false
+Categories=Utility;TextEditor;
+StartupNotify=true

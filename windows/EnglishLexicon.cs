@@ -72,7 +72,19 @@ namespace TelexMini
                       PortablePath("VietnameseOverrides.txt"),addVietnamese);
             return result;
         }
+        static DateTime reloadFlagStamp=DateTime.MinValue;
         internal static void Reload() { data=Build(); }
+        internal static bool ReloadIfChanged() {
+            try {
+                string flag=Path.Combine(DirectoryPath,"dictionary-reload.flag");
+                if(!File.Exists(flag))return false;
+                DateTime stamp=File.GetLastWriteTimeUtc(flag);
+                if(stamp<=reloadFlagStamp)return false;
+                Reload();
+                reloadFlagStamp=stamp;
+                return true;
+            } catch(Exception) {return false;}
+        }
         internal static bool HasPrefix(string text)
         {
             string w=text.ToLowerInvariant();

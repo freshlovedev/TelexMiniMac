@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.IO;
@@ -136,6 +137,25 @@ namespace TelexMini
             Equal("Bad profile rejected","True",
                 ThrowsFormat(delegate {Productivity.ValidateProfiles("code.exe\tUnknown");}).ToString());
             Equal("Unicode quick symbols","True",Array.Exists(Productivity.Symbols,s=>s=="₫").ToString());
+            string oldUiLanguage=UserPreferences.String("UILanguage","vi");
+            UserPreferences.Set("UILanguage","en");
+            Equal("English workspace label","WORKSPACE",UiText.T("KHÔNG GIAN"));
+            Equal("English privacy label","PRIVATE BY DESIGN",UiText.T("RIÊNG TƯ"));
+            Equal("English password label","PASSWORD PROTECTION",UiText.T("BẢO VỆ MẬT KHẨU"));
+            Equal("English productivity nav","⚡  Snippets",UiText.T("⚡  Gõ tắt"));
+            Equal("English light theme label","☀  Light",UiText.T("☀  Sáng"));
+            Equal("English dark theme label","☾  Dark",UiText.T("☾  Tối"));
+            UserPreferences.Set("UILanguage","vi");
+            Equal("Vietnamese workspace label","KHÔNG GIAN",UiText.T("KHÔNG GIAN"));
+            UserPreferences.Set("UILanguage",oldUiLanguage);
+            bool oldDarkTheme=UserPreferences.Bool("DarkTheme",true);
+            UserPreferences.Set("DarkTheme",false);
+            Equal("Light page palette",Color.FromArgb(246,249,252).ToArgb().ToString(),UiPalette.Page.ToArgb().ToString());
+            Equal("Light field palette",Color.FromArgb(241,246,250).ToArgb().ToString(),UiPalette.Field.ToArgb().ToString());
+            UserPreferences.Set("DarkTheme",true);
+            Equal("Dark page palette",Color.FromArgb(15,25,40).ToArgb().ToString(),UiPalette.Page.ToArgb().ToString());
+            Equal("Dark field palette",Color.FromArgb(31,47,66).ToArgb().ToString(),UiPalette.Field.ToArgb().ToString());
+            UserPreferences.Set("DarkTheme",oldDarkTheme);
             Equal("Spell suggestions typo","True",Array.Exists(SpellAdvisor.Suggest("kiễu"),s=>s=="kiểu").ToString());
             Equal("Spell suggestions no auto-replacement","0",SpellAdvisor.Suggest("").Length.ToString());
             var sync=ConfigSync.Parse("TelexMini-Sync\t1\nInputMethod\tVNI\nLanguagePriority\tEnglish\nUnknown\thack\nSmartEnglish\tinvalid\n");
@@ -334,6 +354,22 @@ namespace TelexMini
             Equal("Password always English", "False", ContextPolicy.UseVietnamese(true,false,InputContextKind.Password).ToString());
             Equal("Unknown field fail closed", "False", ContextPolicy.UseVietnamese(true,false,InputContextKind.Checking).ToString());
             Equal("Unavailable field fail closed", "False", ContextPolicy.UseVietnamese(true,false,InputContextKind.Unavailable).ToString());
+            var cachedText=new InputContextMonitor.Snapshot(new IntPtr(101),new IntPtr(202),303,
+                InputContextKind.Text,7);
+            var cachedPassword=new InputContextMonitor.Snapshot(new IntPtr(101),new IntPtr(202),303,
+                InputContextKind.Password,7);
+            Equal("Cached field reused across V/E revisions","True",
+                InputContextMonitor.SnapshotMatches(cachedText,new IntPtr(101),new IntPtr(202),303).ToString());
+            Equal("Changed focus never reuses prior classification","False",
+                InputContextMonitor.SnapshotMatches(cachedPassword,new IntPtr(101),new IntPtr(203),303).ToString());
+            Equal("Reused HWND with new process never reuses classification","False",
+                InputContextMonitor.SnapshotMatches(cachedPassword,new IntPtr(101),new IntPtr(202),304).ToString());
+            Equal("Fresh focus snapshot matches its revision","True",
+                InputContextMonitor.SnapshotMatches(cachedText,new IntPtr(101),new IntPtr(202),303,7).ToString());
+            Equal("Stale focus snapshot fails closed","False",
+                InputContextMonitor.SnapshotMatches(cachedPassword,new IntPtr(101),new IntPtr(202),303,8).ToString());
+            Equal("Unknown process has no restore target","True",
+                (Native.FindTopLevelWindowForProcess(int.MaxValue)==IntPtr.Zero).ToString());
             uint seed=0x47A2B199;
             foreach(bool vni in new[]{false,true}) {
                 string alphabet=vni ? "abcdefghijklmnopqrstuvxyz123456789" :
@@ -385,7 +421,20 @@ namespace TelexMini
             using(var monitor=new InputContextMonitor()) {
                 System.Threading.Thread.Sleep(1000);
                 Equal("Disabled auto mode performs zero UIA queries","0",monitor.AccessibilityQueries.ToString());
+                int revision=monitor.Current.Revision;
+                monitor.Enabled=true;monitor.Enabled=false;
+                Equal("V/E toggles preserve cached focus revision",revision.ToString(),monitor.Current.Revision.ToString());
             }
+            var fastSnapshot=new InputContextMonitor.Snapshot(new IntPtr(11),new IntPtr(22),33,
+                InputContextKind.Text,1);
+            var latencyWatch=System.Diagnostics.Stopwatch.StartNew();
+            for(int i=0;i<10000;i++)
+                InputContextMonitor.SnapshotMatches(fastSnapshot,new IntPtr(11),new IntPtr(22),33);
+            latencyWatch.Stop();
+            if(latencyWatch.ElapsedMilliseconds>250) {
+                failures++;Console.WriteLine("FAIL cached focus lookup exceeded 250ms: "+latencyWatch.ElapsedMilliseconds);
+            } else Console.WriteLine("Cached focus lookup 10k iterations: "+latencyWatch.ElapsedMilliseconds+"ms");
+
             foreach(InputContextKind context in Enum.GetValues(typeof(InputContextKind))) {
                 Equal("Auto context "+context,(context==InputContextKind.Text).ToString(),ContextPolicy.UseVietnamese(true,true,context).ToString());
                 Equal("Manual English stays English "+context,"False",ContextPolicy.UseVietnamese(false,true,context).ToString());
@@ -464,6 +513,15 @@ namespace TelexMini
                     (nav!=null && content!=null && content.Left>=nav.Right && content.Width>0).ToString());
                 Equal("Settings width supports navigation and content","True",
                     (host.ClientSize.Width>=950 && layout!=null && layout.ColumnCount==2).ToString());
+                var leftField=typeof(ModernChrome).GetField("leftCard",BindingFlags.Instance|BindingFlags.NonPublic);
+                var leftCard=leftField==null?null:leftField.GetValue(ui) as Control;
+                int leftChecks=0,leftLabels=0;
+                if(leftCard!=null) foreach(Control child in leftCard.Controls) {
+                    if(child is CheckBox) leftChecks++;
+                    if(child is Label && !string.IsNullOrWhiteSpace(child.Text)) leftLabels++;
+                }
+                Equal("Language card contains both options and labels","True",
+                    (leftCard!=null && leftChecks==2 && leftLabels>=2).ToString());
             }
             string testFile=Path.Combine(Path.GetTempPath(),
                 "TelexMini-Dictionary-UI-"+Guid.NewGuid().ToString("N")+".txt");
@@ -471,7 +529,8 @@ namespace TelexMini
                 File.WriteAllText(testFile,"",System.Text.Encoding.UTF8);
                 using(Form editor=DictionaryEditor.CreateForTests(false,testFile)) {
                 Equal("Dictionary editor opens in app","True",
-                    (editor.Controls.Count>0 && editor.Text.Contains("Anh")).ToString());
+                    (editor.Controls.Count>0 && editor.Text.IndexOf(UiText.IsEnglish?"dictionary":"Anh",StringComparison.OrdinalIgnoreCase)>=0).ToString());
+                Equal("Dictionary editor uses TelexMini icon","True",(editor.Icon!=null).ToString());
                 var textboxes=new List<TextBox>();
                 var buttons=new List<Button>();
                 var lists=new List<ListBox>();
@@ -514,15 +573,29 @@ namespace TelexMini
                 BindingFlags.Instance|BindingFlags.NonPublic,null,Type.EmptyTypes,null);
             Equal("Productivity settings constructor","True",(ctor!=null).ToString());
             if(ctor!=null) using(var dialog=(Form)ctor.Invoke(new object[0])) {
+                Equal("Productivity dialog uses TelexMini icon","True",(dialog.Icon!=null).ToString());
                 var boxes=new List<TextBox>();
                 var buttons=new List<Button>();
                 var lists=new List<ListBox>();
                 CollectControls(dialog,boxes,buttons,lists);
                 Equal("Productivity inline editors","True",(boxes.Count>=3).ToString());
                 Equal("Productivity save control","True",
-                    buttons.Exists(b=>b.Text=="Lưu và áp dụng").ToString());
+                    buttons.Exists(b=>b.Text==UiText.T("Lưu và áp dụng")).ToString());
+            }
+            var advancedCtor=typeof(AdvancedSettings).GetConstructor(
+                BindingFlags.Instance|BindingFlags.NonPublic,null,Type.EmptyTypes,null);
+            Equal("Advanced settings constructor","True",(advancedCtor!=null).ToString());
+            if(advancedCtor!=null) using(var advanced=(Form)advancedCtor.Invoke(new object[0]))
+                Equal("Advanced settings uses TelexMini icon","True",(advanced.Icon!=null).ToString());
+            var iconFactory=typeof(MainForm).GetMethod("MakeIcon",BindingFlags.Static|BindingFlags.NonPublic);
+            if(iconFactory!=null) {
+                using(var v=(Icon)iconFactory.Invoke(null,new object[]{"V",Color.FromArgb(18,167,119)}))
+                    Equal("Vietnamese taskbar icon has V badge","32x32",v.Width+"x"+v.Height);
+                using(var e=(Icon)iconFactory.Invoke(null,new object[]{"E",Color.FromArgb(57,112,232)}))
+                    Equal("English taskbar icon has E badge","32x32",e.Width+"x"+e.Height);
             }
             using(var picker=new SymbolPicker()) {
+                Equal("Symbol picker uses TelexMini icon","True",(picker.Icon!=null).ToString());
                 var boxes=new List<TextBox>();
                 var buttons=new List<Button>();
                 var lists=new List<ListBox>();

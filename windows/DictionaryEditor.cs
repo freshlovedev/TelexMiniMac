@@ -36,7 +36,8 @@ namespace TelexMini
         {
             vietnamese=isVietnamese;
             path=testPath ?? (vietnamese ? EnglishLexicon.VietnamesePath : EnglishLexicon.EnglishPath);
-            Text=vietnamese ? "TelexMini · Ưu tiên tiếng Việt" : "TelexMini · Từ điển tiếng Anh";
+            Text=UiText.T(vietnamese ? "TelexMini · Ưu tiên tiếng Việt" : "TelexMini · Từ điển tiếng Anh");
+            Icon=AppIcons.Brand;
             StartPosition=FormStartPosition.CenterParent;
             ClientSize=new Size(600,570);
             MinimumSize=new Size(560,500);
@@ -63,14 +64,14 @@ namespace TelexMini
 
             var header=new Panel { Dock=DockStyle.Fill,BackColor=BackColor };
             var title=new Label {
-                Text=isVietnamese ? "Ưu tiên Telex" : "Từ điển tiếng Anh",
+                Text=UiText.T(isVietnamese ? "Ưu tiên Telex" : "Từ điển tiếng Anh"),
                 Dock=DockStyle.Top,Height=36,Font=new Font("Segoe UI",19,FontStyle.Bold),
                 ForeColor=ForeColor,AutoEllipsis=true
             };
             var subtitle=new Label {
-                Text=isVietnamese ?
+                Text=UiText.T(isVietnamese ?
                     "Các chuỗi phím cần ưu tiên xử lý như tiếng Việt." :
-                    "Thêm, sửa, xóa từ. Bộ gõ sẽ nhận diện ngay sau khi lưu.",
+                    "Thêm, sửa, xóa từ. Bộ gõ sẽ nhận diện ngay sau khi lưu."),
                 Dock=DockStyle.Bottom,Height=30,
                 ForeColor=Color.FromArgb(154,174,191),AutoEllipsis=true
             };
@@ -117,8 +118,8 @@ namespace TelexMini
                 BackColor=Color.FromArgb(29,42,60),ForeColor=Color.White,
                 BorderStyle=BorderStyle.FixedSingle
             };
-            var add=ActionButton("Thêm / sửa",Color.FromArgb(18,147,133));
-            var remove=ActionButton("Xóa từ",Color.FromArgb(45,63,82));
+            var add=ActionButton(UiText.T("Thêm / sửa"),Color.FromArgb(18,147,133));
+            var remove=ActionButton(UiText.T("Xóa từ"),Color.FromArgb(45,63,82));
             editor.Controls.Add(wordBox,0,0);
             editor.Controls.Add(add,1,0);
             editor.Controls.Add(remove,2,0);
@@ -131,13 +132,13 @@ namespace TelexMini
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,110));
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,110));
             message=new Label {
-                Text="Chỉ hỗ trợ một từ a-z trên mỗi dòng.",
+                Text=UiText.T("Chỉ hỗ trợ một từ a-z trên mỗi dòng."),
                 Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft,
                 ForeColor=Color.FromArgb(144,169,187),
                 Font=new Font("Segoe UI",8.6f),AutoEllipsis=true
             };
-            var cancel=ActionButton("Hủy",Color.FromArgb(45,63,82));
-            var save=ActionButton("Lưu",Color.FromArgb(18,147,133));
+            var cancel=ActionButton(UiText.T("Hủy"),Color.FromArgb(45,63,82));
+            var save=ActionButton(UiText.T("Lưu"),Color.FromArgb(18,147,133));
             footer.Controls.Add(message,0,0);footer.Controls.Add(cancel,1,0);footer.Controls.Add(save,2,0);
             outer.Controls.Add(footer,0,4);
 
@@ -155,10 +156,11 @@ namespace TelexMini
             };
             FormClosing+=delegate(object sender,FormClosingEventArgs e) {
                 if(!changed || DialogResult==DialogResult.OK) return;
-                var answer=MessageBox.Show(this,"Bạn có thay đổi chưa lưu. Đóng mà không lưu?",
-                    "TelexMini",MessageBoxButtons.YesNo,MessageBoxIcon.Question);
+                var answer=MessageBox.Show(this,UiText.T("Bạn có thay đổi chưa lưu. Đóng mà không lưu?"),
+                    UiText.T("TelexMini — Smart Bilingual Typing"),MessageBoxButtons.YesNo,MessageBoxIcon.Question);
                 if(answer==DialogResult.No) e.Cancel=true;
             };
+            UiPalette.Apply(this);
         }
 
         static Button ActionButton(string text,Color back)
@@ -199,7 +201,7 @@ namespace TelexMini
                 RefreshList();
             }
             catch(Exception ex) {
-                message.Text="Không đọc được từ điển: "+ex.Message;
+                message.Text=UiText.T("Không đọc được từ điển: ")+ex.Message;
             }
         }
 
@@ -215,14 +217,14 @@ namespace TelexMini
             if(selected!=null && wordList.Items.Contains(selected))
                 wordList.SelectedItem=selected;
             wordList.EndUpdate();
-            count.Text=wordList.Items.Count+" / "+words.Count+" từ";
+            count.Text=wordList.Items.Count+" / "+words.Count+" "+UiText.T("Từ");
         }
 
         void AddWord()
         {
             string word=wordBox.Text.Trim().ToLowerInvariant();
             if(!IsWord(word)) {
-                message.Text="Từ phải dài 1–64 ký tự, chỉ gồm a-z.";
+                message.Text=UiText.T("Từ phải dài 1–64 ký tự, chỉ gồm a-z.");
                 return;
             }
             string selected=wordList.SelectedItem as string;
@@ -231,7 +233,7 @@ namespace TelexMini
             searchBox.Clear();
             RefreshList();
             wordList.SelectedItem=word;
-            message.Text="Đã thay đổi. Bấm Lưu để áp dụng.";
+            message.Text=UiText.T("Đã thay đổi. Bấm Lưu để áp dụng.");
         }
 
         void RemoveWord()
@@ -241,7 +243,7 @@ namespace TelexMini
             if(words.Remove(selected)) changed=true;
             wordBox.Clear();
             RefreshList();
-            message.Text="Đã xóa khỏi danh sách. Bấm Lưu để áp dụng.";
+            message.Text=UiText.T("Đã xóa khỏi danh sách. Bấm Lưu để áp dụng.");
         }
 
         void SaveWords()
@@ -257,8 +259,8 @@ namespace TelexMini
                 Close();
             }
             catch(Exception ex) {
-                MessageBox.Show(this,"Không lưu được từ điển:\n"+ex.Message,
-                    "TelexMini",MessageBoxButtons.OK,MessageBoxIcon.Error);
+                MessageBox.Show(this,UiText.T("Không lưu được từ điển:\n")+ex.Message,
+                    UiText.T("TelexMini — Smart Bilingual Typing"),MessageBoxButtons.OK,MessageBoxIcon.Error);
             }
         }
     }
