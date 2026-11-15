@@ -116,17 +116,17 @@ class Sidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 238,
+      width: 206,
       color: const Color(0xFF0D1F30),
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 18),
+      padding: const EdgeInsets.fromLTRB(12, 16, 12, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const BrandHeader(),
-          const SizedBox(height: 28),
+          const SizedBox(height: 19),
           Text(controller.t('KHÔNG GIAN', 'WORKSPACE'),
               style: const TextStyle(color: Color(0xFF91A9BF), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: .6)),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           _nav(AppPage.overview, Icons.grid_view_rounded, controller.t('Tổng quan', 'Overview')),
           _nav(AppPage.englishDictionary, Icons.menu_book_rounded, controller.t('Từ điển Anh', 'English dictionary')),
           _nav(AppPage.vietnamesePriority, Icons.translate_rounded, controller.t('Ưu tiên Telex', 'Vietnamese priority')),
@@ -135,23 +135,19 @@ class Sidebar extends StatelessWidget {
           _nav(AppPage.settings, Icons.settings_rounded, controller.t('Cài đặt', 'Settings')),
           const Spacer(),
           Container(
-            padding: const EdgeInsets.all(15),
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
+              color: const Color(0xFF172F40),
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(color: const Color(0xFF2D4657)),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('PRIVATE BY DESIGN', style: TextStyle(color: Color(0xFF8198AD), fontSize: 10, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 10),
-                Text(controller.t('Không lưu nội dung gõ\nKhông gửi dữ liệu lên mạng', 'No typing history\nNo data sent online'),
-                    style: const TextStyle(color: Color(0xFF91A7BC), fontSize: 11, height: 1.55)),
-              ],
-            ),
+            child: Row(children: [
+              const Icon(Icons.lock_outline_rounded, size: 15, color: Color(0xFF74DDC7)),
+              const SizedBox(width: 9),
+              Expanded(child: Text(controller.t('Riêng tư · Offline', 'Private · Offline'),
+                style: const TextStyle(color: Color(0xFFCDDFE9), fontSize: 11, fontWeight: FontWeight.w600))),
+            ]),
           ),
-          const SizedBox(height: 12),
-          Text('TELEXMINI DESKTOP', style: const TextStyle(color: Color(0xFF91A9BF), fontSize: 10, fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -160,21 +156,21 @@ class Sidebar extends StatelessWidget {
   Widget _nav(AppPage page, IconData icon, String label) {
     final selected = controller.page == page;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 5),
+      padding: const EdgeInsets.only(bottom: 3),
       child: InkWell(
         borderRadius: BorderRadius.circular(9),
         onTap: () => controller.setPage(page),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
           decoration: BoxDecoration(
             color: selected ? const Color(0xFF155F61) : Colors.transparent,
             borderRadius: BorderRadius.circular(9),
           ),
           child: Row(
             children: [
-              Icon(icon, size: 18, color: selected ? const Color(0xFF75E8D4) : Colors.white70),
-              const SizedBox(width: 12),
+              Icon(icon, size: 17, color: selected ? const Color(0xFF75E8D4) : Colors.white70),
+              const SizedBox(width: 10),
               Expanded(child: Text(label, style: TextStyle(
                 color: selected ? const Color(0xFF75E8D4) : Colors.white,
                 fontSize: 13, fontWeight: selected ? FontWeight.w700 : FontWeight.w500,

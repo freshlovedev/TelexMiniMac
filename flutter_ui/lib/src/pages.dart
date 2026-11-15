@@ -12,155 +12,230 @@ class OverviewPage extends StatelessWidget {
   Widget build(BuildContext context) => PageFrame(
     controller: controller,
     title: controller.t('Gõ theo cách của bạn.', 'Type your way.'),
-    subtitle: controller.t('Hai ngôn ngữ. Một trải nghiệm liền mạch.', 'Two languages. One seamless experience.'),
-    child: SingleChildScrollView(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _HeroMode(controller: controller),
-        const SizedBox(height: 16),
-        SectionTitle(controller.t('TÙY CHỈNH TRẢI NGHIỆM', 'PERSONALIZE YOUR EXPERIENCE')),
-        LayoutBuilder(builder: (context, box) {
-          final stacked = box.maxWidth < 760;
-          final first = SurfaceCard(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(controller.t('NGÔN NGỮ NHẬN DIỆN','LANGUAGE RECOGNITION'),
-                style: const TextStyle(color: muted, fontSize: 11, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 12),
-              PreferenceSwitch(
-                title: controller.t('Bảo vệ từ tiếng Anh (offline)','Protect English words (offline)'),
-                subtitle: controller.t('Nhận diện cục bộ, không cần Internet','Local recognition, no Internet required'),
-                value: controller.smartEnglish,
-                onChanged: (v) { controller.smartEnglish=v; controller.save(); },
-              ),
-              const Divider(height: 12),
-              PreferenceSwitch(
-                title: controller.t('Khôi phục từ không hợp lệ','Restore invalid words'),
-                subtitle: controller.t('Giữ nguyên từ khi không phải tiếng Việt','Preserve words that are not Vietnamese'),
-                value: controller.restoreInvalid,
-                onChanged: (v) { controller.restoreInvalid=v; controller.save(); },
-              ),
-            ]),
-          );
-          final second = SurfaceCard(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(controller.t('TƯƠNG THÍCH AN TOÀN','SAFE COMPATIBILITY'),
-                style: const TextStyle(color: muted, fontSize: 11, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 12),
-              if (Platform.isWindows) ...[
-                PreferenceSwitch(
-                  title: controller.t('Tự dùng English trong terminal','Use English automatically in terminals'),
-                  subtitle: controller.t('Không can thiệp lệnh và mã nguồn','Avoid changing commands and source code'),
-                  value: controller.terminalEnglish,
-                  onChanged: (v) { controller.terminalEnglish=v; controller.save(); },
+    subtitle: controller.t('Hai ngôn ngữ. Một trải nghiệm liền mạch.',
+      'Two languages. One seamless experience.'),
+    child: Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1120),
+        child: SingleChildScrollView(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _HeroMode(controller: controller),
+            const SizedBox(height: 13),
+            SectionTitle(controller.t('TÙY CHỈNH TRẢI NGHIỆM',
+              'PERSONALIZE YOUR EXPERIENCE')),
+            LayoutBuilder(builder: (context, box) {
+              final first = SurfaceCard(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _CardHeading(
+                    icon: Icons.spellcheck_rounded,
+                    label: controller.t('NHẬN DIỆN NGÔN NGỮ','LANGUAGE RECOGNITION'),
+                  ),
+                  const SizedBox(height: 7),
+                  PreferenceSwitch(
+                    title: controller.t('Bảo vệ từ tiếng Anh','Protect English words'),
+                    subtitle: controller.t('Từ điển offline, nhận diện ngay khi gõ',
+                      'Offline dictionary, real-time recognition'),
+                    value: controller.smartEnglish,
+                    onChanged: (v) { controller.smartEnglish = v; controller.save(); },
+                  ),
+                  const Divider(height: 9),
+                  PreferenceSwitch(
+                    title: controller.t('Khôi phục từ không hợp lệ','Restore invalid words'),
+                    subtitle: controller.t('Giữ nguyên từ không phải tiếng Việt',
+                      'Preserve non-Vietnamese words'),
+                    value: controller.restoreInvalid,
+                    onChanged: (v) { controller.restoreInvalid = v; controller.save(); },
+                  ),
+                ],
+              ));
+              final second = SurfaceCard(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _CardHeading(
+                    icon: Icons.verified_user_outlined,
+                    label: controller.t('TƯƠNG THÍCH AN TOÀN','SAFE COMPATIBILITY'),
+                  ),
+                  const SizedBox(height: 7),
+                  if (Platform.isWindows) ...[
+                    PreferenceSwitch(
+                      title: controller.t('English trong terminal','English in terminals'),
+                      subtitle: controller.t('Giữ nguyên lệnh và mã nguồn',
+                        'Keep commands and source code unchanged'),
+                      value: controller.terminalEnglish,
+                      onChanged: (v) { controller.terminalEnglish = v; controller.save(); },
+                    ),
+                    const Divider(height: 9),
+                  ],
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Icon(Icons.lock_outline_rounded, size: 18, color: teal),
+                    const SizedBox(width: 9),
+                    Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(controller.t('Mật khẩu luôn dùng tiếng Anh',
+                          'Passwords always use English'),
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                        const SizedBox(height: 2),
+                        Text(controller.t('Không đọc nội dung ô mật khẩu',
+                          'Password fields are never read'),
+                          style: const TextStyle(color: muted, fontSize: 11)),
+                      ],
+                    )),
+                  ]),
+                ],
+              ));
+              return box.maxWidth < 710
+                ? Column(children: [first, const SizedBox(height: 10), second])
+                : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(child: first),
+                    const SizedBox(width: 12),
+                    Expanded(child: second),
+                  ]);
+            }),
+            const SizedBox(height: 11),
+            SurfaceCard(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _CardHeading(icon: Icons.keyboard_alt_outlined,
+                  label: controller.t('THỬ GÕ NGAY','TRY TYPING')),
+                const SizedBox(height: 8),
+                TextField(
+                  onChanged: (v) => controller.previewText = v,
+                  decoration: InputDecoration(
+                    hintText: controller.t('Gõ thử tiếng Việt và tiếng Anh...',
+                      'Try Vietnamese and English here...'),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
                 ),
                 const SizedBox(height: 5),
-              ],
-              Text(controller.t('Mật khẩu: luôn giữ nguyên tiếng Anh','Password fields: always preserve English'),
-                style: const TextStyle(color: teal, fontWeight: FontWeight.w700, fontSize: 12)),
-              const SizedBox(height: 4),
-              Text(controller.t('Không đọc hoặc xử lý nội dung ô mật khẩu','Password field contents are never read or processed'),
-                style: const TextStyle(color: muted, fontSize: 11)),
-            ]),
-          );
-          return stacked
-            ? Column(children: [first, const SizedBox(height: 12), second])
-            : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(child: first), const SizedBox(width: 14), Expanded(child: second),
-              ]);
-        }),
-        const SizedBox(height: 16),
-        SurfaceCard(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(controller.t('THỬ GÕ NGAY','TRY TYPING'),
-              style: const TextStyle(color: muted, fontSize: 11, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 10),
-            TextField(
-              onChanged: (v) => controller.previewText=v,
-              decoration: InputDecoration(
-                hintText: controller.t('Gõ thử tiếng Việt và tiếng Anh...','Try Vietnamese and English here...'),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 13, vertical: 13),
-              ),
+                Text(controller.t('Thử: tieengs → tiếng  ·  vieetj → Việt',
+                  'Try: tieengs → tiếng  ·  vieetj → Việt'),
+                  style: const TextStyle(color: muted, fontSize: 10.5)),
+              ]),
             ),
-            const SizedBox(height: 8),
-            Text(controller.t('Ví dụ: tieengs vieetj · bilingual typing','Example: tieengs vieetj · bilingual typing'),
-              style: const TextStyle(color: muted, fontSize: 11)),
+            const SizedBox(height: 11),
+            Row(children: [
+              Icon(
+                controller.nativeConnected
+                  ? Icons.check_circle_outline_rounded
+                  : Icons.warning_amber_rounded,
+                size: 15,
+                color: controller.nativeConnected ? teal : const Color(0xFFB37B24),
+              ),
+              const SizedBox(width: 6),
+              Expanded(child: Text(
+                controller.nativeConnected
+                  ? controller.t('Đã kết nối bộ máy gõ · Hoạt động offline',
+                    'Native engine connected · Offline')
+                  : controller.t('Chưa kết nối bộ máy gõ hệ thống',
+                    'Native input engine not connected'),
+                style: const TextStyle(color: muted, fontSize: 11),
+              )),
+              Text(controller.t('Không lưu lịch sử gõ', 'No typing history'),
+                style: const TextStyle(color: muted, fontSize: 10.5)),
+            ]),
           ]),
         ),
-        const SizedBox(height: 10),
-        Row(children: [
-          Icon(Icons.shield_outlined, size: 15, color: Theme.of(context).colorScheme.onSurfaceVariant),
-          const SizedBox(width: 6),
-          Expanded(child: Text(
-            controller.nativeConnected
-              ? controller.t('Đã kết nối giao diện với cấu hình hệ thống.','Connected to native settings bridge.')
-              : controller.t('Chưa kết nối cầu nối hệ thống. Chế độ gõ có thể chưa được áp dụng.','Native bridge unavailable. Input-mode changes may not take effect.'),
-            style: const TextStyle(color: muted, fontSize: 10.5),
-          )),
-        ]),
-      ]),
+      ),
     ),
   );
+}
+
+class _CardHeading extends StatelessWidget {
+  const _CardHeading({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+  @override
+  Widget build(BuildContext context) => Row(children: [
+    Icon(icon, color: teal, size: 17),
+    const SizedBox(width: 8),
+    Text(label, style: const TextStyle(
+      color: muted, fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: .3)),
+  ]);
 }
 
 class _HeroMode extends StatelessWidget {
   const _HeroMode({required this.controller});
   final AppController controller;
+
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(24),
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 17),
     decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(17),
       gradient: const LinearGradient(
         begin: Alignment.centerLeft,
         end: Alignment.centerRight,
-        colors: [Color(0xFF008F89), Color(0xFF2879AE)],
+        colors: [Color(0xFF008D85), Color(0xFF267EA9)],
       ),
-      border: Border.all(color: const Color(0xFF36BDB1), width: 1),
     ),
     child: LayoutBuilder(builder: (context, box) {
-      final stacked = box.maxWidth < 640;
       final left = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(controller.t('CHẾ ĐỘ HIỆN TẠI','CURRENT MODE'),
-          style: const TextStyle(color: Color(0xFFC4F3EB), fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: .4)),
-        const SizedBox(height: 12),
-        Text(controller.t('Chuyển chế độ tức thì','Switch modes instantly'),
-          style: const TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 18),
-        SizedBox(
-          width: 270,
-          child: FilledButton(
-            onPressed: () => controller.setVietnameseEnabled(!controller.vietnameseEnabled),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFE0FFF7),
-              foregroundColor: const Color(0xFF06474A),
-              padding: const EdgeInsets.symmetric(vertical: 17),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
-            ),
-            child: Text(
-              controller.vietnameseEnabled
-                ? controller.t('V  ·  TIẾNG VIỆT','V  ·  VIETNAMESE')
-                : controller.t('E  ·  TIẾNG ANH','E  ·  ENGLISH'),
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: .4),
-            ),
+        Row(children: [
+          const Icon(Icons.language_rounded, color: Color(0xFFB5FFF0), size: 16),
+          const SizedBox(width: 7),
+          Text(controller.t('CHẾ ĐỘ GÕ','INPUT MODE'),
+            style: const TextStyle(color: Color(0xFFC4F3EB),
+              fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: .4)),
+        ]),
+        const SizedBox(height: 8),
+        Text(controller.t('Chuyển ngôn ngữ tức thì','Instant language switch'),
+          style: const TextStyle(color: Colors.white,
+            fontSize: 19, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 10),
+        SizedBox(width: 265, height: 42, child: FilledButton(
+          onPressed: () => controller.setVietnameseEnabled(!controller.vietnameseEnabled),
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFE3FFF9),
+            foregroundColor: const Color(0xFF06474A),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
-        ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const Icon(Icons.swap_horiz_rounded, size: 19),
+            const SizedBox(width: 8),
+            Flexible(child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                controller.vietnameseEnabled
+                  ? controller.t('V  ·  TIẾNG VIỆT','V  ·  VIETNAMESE')
+                  : controller.t('E  ·  TIẾNG ANH','E  ·  ENGLISH'),
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+              ),
+            )),
+          ]),
+        )),
       ]);
       final right = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(controller.t('CHẾ ĐỘ AN TOÀN','SAFE MODE'),
-          style: const TextStyle(color: Color(0xFFC4F3EB), fontSize: 11, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 12),
-        Text(controller.t('Gõ tiếng Việt và tiếng Anh tự nhiên','Type Vietnamese and English naturally'),
-          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 5),
+        Row(children: [
+          const Icon(Icons.shield_outlined, size: 17, color: Color(0xFFB5FFF0)),
+          const SizedBox(width: 7),
+          Text(controller.t('AN TOÀN & RIÊNG TƯ','SAFE & PRIVATE'),
+            style: const TextStyle(color: Color(0xFFC4F3EB),
+              fontSize: 10.5, fontWeight: FontWeight.w800)),
+        ]),
+        const SizedBox(height: 9),
+        Text(controller.t('Gõ tự nhiên, không gián đoạn',
+          'Natural typing, no interruptions'),
+          style: const TextStyle(color: Colors.white,
+            fontSize: 15, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 7),
         Text(
-          Platform.isWindows
-            ? controller.t('Mật khẩu luôn dùng English\nBảo vệ ứng dụng terminal\nXử lý hoàn toàn offline','Passwords always use English\nProtect terminal applications\nFully offline processing')
-            : controller.t('Mật khẩu luôn dùng English\nKhông xử lý nội dung nhạy cảm\nXử lý hoàn toàn offline','Passwords always use English\nSensitive fields are not processed\nFully offline processing'),
-          style: const TextStyle(color: Color(0xFFE5F5F7), fontSize: 12, height: 1.6),
+          controller.t('Mật khẩu tự chuyển English  ·  Hoạt động offline\nTelex / VNI  ·  Đồng bộ phím tắt',
+            'Passwords use English  ·  Fully offline\nTelex / VNI  ·  Shortcut synchronization'),
+          style: const TextStyle(color: Color(0xFFE5F5F7), fontSize: 11.5, height: 1.6),
         ),
       ]);
-      return stacked
-        ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [left, const SizedBox(height: 22), right])
-        : Row(children: [Expanded(child: left), const SizedBox(width: 28), Expanded(child: right)]);
+      return box.maxWidth < 620
+        ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            left, const SizedBox(height: 17), right,
+          ])
+        : Row(children: [
+            Expanded(flex: 5, child: left),
+            const SizedBox(width: 16),
+            Expanded(flex: 4, child: right),
+          ]);
     }),
   );
 }

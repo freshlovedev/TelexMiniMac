@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:telexmini_ui/src/app.dart';
 import 'package:telexmini_ui/src/controller.dart';
+import 'package:telexmini_ui/src/widgets.dart';
 
 const _bridge = MethodChannel('com.telexmini/control');
 
@@ -69,6 +70,22 @@ void main() {
     expect(find.text('TÙY CHỈNH TRẢI NGHIỆM'), findsOneWidget);
     expect(find.text('THỬ GÕ NGAY'), findsOneWidget);
     expect(find.text('Từ điển Anh'), findsOneWidget);
+  });
+
+  testWidgets('1080x680 desktop layout has no overflow and uses custom icon', (tester) async {
+    final controller = makeIsolatedController();
+    tester.view.physicalSize = const Size(1080, 680);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    await tester.runAsync(() => controller.load());
+    await tester.pumpWidget(TelexMiniApp(controller: controller));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.byType(BrandMark), findsOneWidget);
+    expect(find.text('T'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('compact layout exposes responsive navigation', (tester) async {

@@ -3,12 +3,21 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot
-$App = Join-Path $Root 'flutter_ui'
+# The Windows standalone workspace keeps Flutter beside the native sources;
+# a cloned cross-platform repository keeps Flutter at the repository root.
+$FlutterRoot = if (Test-Path (Join-Path $Root 'flutter_ui')) { $Root } else { Split-Path $Root -Parent }
+$App = Join-Path $FlutterRoot 'flutter_ui'
 $Release = Join-Path $App 'build\windows\x64\runner\Release'
 $Destination = Join-Path $Root 'build\TelexMini-Windows-x64'
 $Archive = Join-Path $Root 'build\TelexMini-Windows-x64.zip'
 $TempEngine = Join-Path $Root 'build\TelexMini-Native-Checked.exe'
 New-Item -ItemType Directory -Force -Path (Join-Path $Root 'build') | Out-Null
+
+# Generate the same geometric bilingual-switch brand icon used in the Flutter UI.
+& (Join-Path $Root 'render-brand-icon.ps1') -OutputPath (Join-Path $FlutterRoot 'Resources\TelexMini-Icon-Teal.png')
+if (-not (Test-Path -LiteralPath (Join-Path $Root 'Resources\TelexMini-Icon-Teal.png'))) { throw 'Brand artwork generation failed.' }
+& (Join-Path $Root 'make-icon.ps1') -SourcePath (Join-Path $Root 'Resources\TelexMini-Icon-Teal.png') -OutputPath (Join-Path $FlutterRoot 'flutter_ui\windows\runner\resources\app_icon.ico')
+if (-not (Test-Path -LiteralPath (Join-Path $Root 'flutter_ui\windows\runner\resources\app_icon.ico'))) { throw 'Flutter executable icon generation failed.' }
 
 if (-not (Test-Path -LiteralPath $FlutterExecutable)) {
     $flutter = Get-Command flutter -ErrorAction SilentlyContinue

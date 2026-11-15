@@ -75,6 +75,10 @@ bash tools/build-flutter-ui-linux.sh
 
 This builds the settings UI only. **System-wide Linux typing is not implemented yet.** The planned native adapter is a Fcitx5 engine for X11 and Wayland; it must port and pass the full Telex/VNI regression corpus and be tested on real GNOME/KDE desktops before release.
 
+## Compact desktop visual identity
+
+The shared Flutter dashboard now defaults to **1080 × 680** logical pixels on both Windows and macOS. It uses a **206-pixel sidebar**, condensed preferences, a tighter V/E switch card, and a full-width typing field without oversized padding. Smaller windows retain scrollable content. The brand icon is a pair of opposing rounded language-switch arrows (no generic letter T), used by Flutter, the Windows EXE and the macOS Dock/input-method bundle. The source icon can be regenerated with `swift tools/RenderBrandIcon.swift Resources/TelexMini-Icon-Teal.png` on macOS or `windows/render-brand-icon.ps1` on Windows. The Windows release script also regenerates both Windows executables' icon resources. A dedicated 1080 × 680 widget test guards against layout overflow.
+
 ## Windows settings and dictionary bridge
 
 The C# input engine reads settings from `%LOCALAPPDATA%\\TelexMini`, detects Flutter-written preference changes and applies V/E mode, Telex/VNI, language priority, productivity flags and auto-start without restarting. The Flutter dashboard polls native V/E mode every 450 ms while open, so hotkey changes are reflected without multi-second UI delays. The native fallback interface appears only when the co-located Flutter UI cannot launch.
