@@ -21,6 +21,10 @@ void _installMockBridge(List<MethodCall> calls) {
         };
       case 'loadDictionary':
         return <String>[];
+      case 'listProcesses':
+        return <String>['notepad.exe','explorer.exe'];
+      case 'loadProfiles':
+        return '';
       default:
         return null;
     }
@@ -165,6 +169,51 @@ void main() {
     await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 150)));
     expect(calls.where((call) => call.method == 'saveDictionary').length, 2);
   });
+  testWidgets('process manager opens from sidebar and lists running apps', (tester) async {
+    final calls = <MethodCall>[];
+    _installMockBridge(calls);
+    addTearDown(_removeMockBridge);
+    final controller = makeIsolatedController();
+    tester.view.physicalSize = const Size(1080, 680);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    await tester.runAsync(() => controller.load());
+    await tester.pumpWidget(TelexMiniApp(controller: controller));
+    await tester.tap(find.text('Ứng dụng & process'));
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.runAsync(() async => Future<void>.delayed(const Duration(milliseconds: 150)));
+    await tester.pump(const Duration(milliseconds: 350));
+    if (Platform.isLinux) {
+      // Linux adapter does not expose per-process exclusions yet. Verify the
+      // integrated page's accurate unsupported state rather than expecting
+      // Windows-only task names and interactive per-process controls.
+      expect(find.text('Chưa hỗ trợ chọn process trên Linux.'), findsOneWidget);
+      expect(find.byType(CheckboxListTile), findsNothing);
+    } else {
+      expect(find.text('notepad.exe'), findsOneWidget);
+      expect(find.text('explorer.exe'), findsOneWidget);
+      await tester.tap(find.byType(CheckboxListTile).first);
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(controller.excludedApps.isNotEmpty, isTrue);
+      expect(calls.any((call) => call.method == 'applyPreferences'), isTrue);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('per-app profile persists via native channel', (tester) async {
+    final calls = <MethodCall>[];
+    _installMockBridge(calls);
+    addTearDown(_removeMockBridge);
+    final controller = makeIsolatedController();
+    await tester.runAsync(() => controller.load());
+    await tester.runAsync(() => controller.saveProfiles('notepad.exe\tEnglish'));
+    expect(controller.profilesText, 'notepad.exe\tEnglish');
+    expect(calls.any((call) => call.method == 'saveProfiles'), isTrue);
+  });
+
   testWidgets('external native mode is reflected in UI', (tester) async {
     bool nativeVietnamese = true;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

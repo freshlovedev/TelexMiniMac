@@ -49,6 +49,23 @@ class MainFlutterWindow: NSWindow {
           }
           self.applyPreferences(args)
           result(nil)
+        case "listProcesses":
+          let identifiers = NSWorkspace.shared.runningApplications
+            .compactMap { $0.bundleIdentifier }
+            .filter { !$0.isEmpty }
+          result(Array(Set(identifiers)).sorted())
+        case "loadProfiles":
+          result(self.readProfiles())
+        case "saveProfiles":
+          guard let args = call.arguments as? [String: Any],
+                let text = args["text"] as? String,
+                Self.validatedProfiles(text) else {
+            result(FlutterError(code: "BAD_ARGUMENT", message: "Invalid application profiles.", details: nil))
+            return
+          }
+          try Self.writeLocalFile(text, named: "profiles.tsv")
+          try self.signalEngineReload()
+          result(nil)
         case "loadDictionary":
           guard let args = call.arguments as? [String: Any],
                 let vietnamese = args["vietnamese"] as? Bool else {
@@ -105,6 +122,26 @@ class MainFlutterWindow: NSWindow {
       try? Self.writeLocalFile(validated, named: "snippets.tsv")
     }
     try? signalEngineReload()
+  }
+
+  private func readProfiles() -> String {
+    let file = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent("Library/Application Support/TelexMini/profiles.tsv")
+    return (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+  }
+
+  private static func validatedProfiles(_ source: String) -> Bool {
+    if source.utf8.count > 65536 { return false }
+    var seen = Set<String>()
+    for line in source.split(whereSeparator: \.isNewline) {
+      let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
+      guard parts.count == 2,
+            parts[0].range(of: "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,254}$",
+                           options: .regularExpression) != nil,
+            ["English","Vietnamese","Balanced"].contains(String(parts[1])),
+            seen.insert(String(parts[0]).lowercased()).inserted else { return false }
+    }
+    return true
   }
 
   private func readDictionary(vietnamese: Bool) -> [String] {

@@ -1,0 +1,26 @@
+name: Linux native IME (Ubuntu build gate)
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native_core/**'
+      - 'linux_ime/**'
+      - 'Tests/telex-corpus.tsv'
+      - 'Resources/english-core.txt'
+  pull_request:
+    paths:
+      - 'native_core/**'
+      - 'linux_ime/**'
+      - 'Tests/telex-corpus.tsv'
+      - 'Resources/english-core.txt'
+jobs:
+  ubuntu-native:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake build-essential pkg-config libibus-1.0-dev libfcitx5core-dev
+      - name: C++ corpus and IBus / Fcitx5
+        run: bash linux_ime/build.sh all

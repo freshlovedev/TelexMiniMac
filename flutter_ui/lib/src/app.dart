@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'controller.dart';
+import 'applications_page.dart';
 import 'pages.dart';
 import 'widgets.dart';
 
@@ -103,6 +104,8 @@ class AppShell extends StatelessWidget {
         return SnippetsPage(controller: controller);
       case AppPage.symbols:
         return SymbolsPage(controller: controller);
+      case AppPage.applications:
+        return ApplicationsPage(controller: controller);
       case AppPage.settings:
         return SettingsPage(controller: controller);
     }
@@ -132,6 +135,7 @@ class Sidebar extends StatelessWidget {
           _nav(AppPage.vietnamesePriority, Icons.translate_rounded, controller.t('Ưu tiên Telex', 'Vietnamese priority')),
           _nav(AppPage.snippets, Icons.bolt_rounded, controller.t('Gõ tắt', 'Snippets')),
           _nav(AppPage.symbols, Icons.auto_awesome_rounded, controller.t('Ký tự nhanh', 'Quick symbols')),
+          _nav(AppPage.applications, Icons.apps_rounded, controller.t('Ứng dụng & process','Apps & processes')),
           _nav(AppPage.settings, Icons.settings_rounded, controller.t('Cài đặt', 'Settings')),
           const Spacer(),
           Container(
@@ -212,6 +216,7 @@ class CompactNavigation extends StatelessWidget {
       NavigationDestination(icon: const Icon(Icons.translate_rounded), label: controller.t('Telex','Telex')),
       NavigationDestination(icon: const Icon(Icons.bolt_rounded), label: controller.t('Gõ tắt','Snippets')),
       NavigationDestination(icon: const Icon(Icons.auto_awesome_rounded), label: controller.t('Ký tự','Symbols')),
+      NavigationDestination(icon: const Icon(Icons.apps_rounded), label: controller.t('Ứng dụng','Apps')),
       NavigationDestination(icon: const Icon(Icons.settings_rounded), label: controller.t('Cài đặt','Settings')),
     ],
   );

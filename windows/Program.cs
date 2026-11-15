@@ -6,6 +6,7 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace TelexMini
 {
@@ -21,21 +22,35 @@ namespace TelexMini
         readonly CheckBox autoEnglish, restoreWords, smartEnglish;
         readonly GameGuard gameGuard;
         readonly ToolStripMenuItem pauseItem;
+        Native.WinEventProc focusEventProc;
+        IntPtr foregroundEventHook,focusEventHook;
+        FileSystemWatcher preferencesWatcher;
         ModernChrome chrome;
         bool gameActive, manualPause;
         string displayedMode="";
         Icon vietIcon, englishIcon;
         bool registered, cleaned;
+        string activeHotkey;
+        string lastExclusionPolicy;
+        readonly bool sharedUiInstalled;
         internal MainForm()
         {
-            // Flutter owns the visible desktop UI when installed alongside the native engine.
+            sharedUiInstalled=File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"TelexMiniSettings.exe"));
+            // Never flash an obsolete native settings window in the Flutter bundle.
             Shown+=delegate {
-                if(SharedUiLauncher.OpenOrActivate()) {
-                    BeginInvoke((Action)delegate { Hide(); ShowInTaskbar=false; });
+                if(sharedUiInstalled) {
+                    Hide();
+                    ShowInTaskbar=false;
+                    if(!SharedUiLauncher.OpenOrActivate() && tray!=null)
+                        tray.ShowBalloonTip(2200,"TelexMini",
+                            "Giao diện Flutter chưa khởi động; bộ gõ vẫn hoạt động trong khay.",
+                            ToolTipIcon.Warning);
                 }
             };
             Text="Telex Mini"; ClientSize=new Size(334,306); FormBorderStyle=FormBorderStyle.FixedSingle;
-            MaximizeBox=false; ShowInTaskbar=true; StartPosition=FormStartPosition.CenterScreen; TopMost=true;
+            MaximizeBox=false; ShowInTaskbar=!sharedUiInstalled;
+            Opacity=sharedUiInstalled ? 0 : 1;
+            StartPosition=FormStartPosition.CenterScreen; TopMost=!sharedUiInstalled;
             BackColor=Color.FromArgb(246,248,251); Font=new Font("Segoe UI",10);
             vietIcon=MakeIcon("V",Color.FromArgb(0,183,164)); englishIcon=MakeIcon("E",Color.FromArgb(0,183,164));
             Icon=AppIcons.Brand;
@@ -45,14 +60,16 @@ namespace TelexMini
             status=new Label { Location=new Point(18,83), Size=new Size(298,68), TextAlign=ContentAlignment.MiddleCenter };
             hide=new Button { Text=UiText.T("Thu xuống khay"), Location=new Point(18,262), Size=new Size(175,28), TabStop=false };
             exit=new Button { Text=UiText.T("Thoát"), Location=new Point(203,262), Size=new Size(113,28), TabStop=false };
-            Controls.AddRange(new Control[] { toggle,status,hide,exit });
+            // Flutter owns the settings surface. Do not allocate hidden
+            // WinForms child HWNDs/GDI resources in tray-only mode.
+            if(!sharedUiInstalled)Controls.AddRange(new Control[] { toggle,status,hide,exit });
             autoEnglish=new CheckBox { Text=UiText.T("Tự dùng English trong terminal"), Location=new Point(18,157), Size=new Size(298,25),
                 Checked=UserPreferences.Bool("AutoEnglish",false), TabStop=false };
             restoreWords=new CheckBox { Text=UiText.T("Khôi phục từ không hợp lệ"), Location=new Point(18,186), Size=new Size(298,25),
                 Checked=UserPreferences.Bool("RestoreInvalid",true), TabStop=false };
             smartEnglish=new CheckBox { Text=UiText.T("Bảo vệ từ tiếng Anh (offline)"), Location=new Point(18,215), Size=new Size(298,25),
                 Checked=UserPreferences.Bool("SmartEnglish",true), TabStop=false };
-            Controls.AddRange(new Control[] { autoEnglish,restoreWords,smartEnglish });
+            if(!sharedUiInstalled)Controls.AddRange(new Control[] { autoEnglish,restoreWords,smartEnglish });
             context=new InputContextMonitor();
             keyboard=new Keyboard(context);
             keyboard.Enabled=UserPreferences.Bool("VietnameseEnabled",true);
@@ -64,6 +81,7 @@ namespace TelexMini
             keyboard.UseVni=UserPreferences.String("InputMethod","Telex")=="VNI";
             keyboard.SnippetsEnabled=UserPreferences.Bool("SnippetsEnabled",false);
             keyboard.ProfilesEnabled=UserPreferences.Bool("ProfilesEnabled",false);
+            keyboard.ReloadProductivity();
             autoEnglish.CheckedChanged+=delegate { keyboard.AutoEnglish=autoEnglish.Checked; UserPreferences.Set("AutoEnglish",autoEnglish.Checked); keyboard.Enabled=keyboard.Enabled; SyncPerformance(); UpdateMode(); };
             restoreWords.CheckedChanged+=delegate { keyboard.RestoreInvalid=restoreWords.Checked; UserPreferences.Set("RestoreInvalid",restoreWords.Checked); };
             smartEnglish.CheckedChanged+=delegate {
@@ -71,27 +89,34 @@ namespace TelexMini
                     UserPreferences.String("LanguagePriority","Balanced")!="Vietnamese";
                 UserPreferences.Set("SmartEnglish",smartEnglish.Checked); UpdateMode();
             };
-            var menu=new ContextMenuStrip();
-            switchItem=new ToolStripMenuItem("",null,delegate { Toggle(); }); menu.Items.Add(switchItem);
-            pauseItem=new ToolStripMenuItem("Tạm dừng hoàn toàn: game / remote") { CheckOnClick=true };
+            var menu=TrayMenuStyle.Create();
+            TrayMenuStyle.AddHeader(menu);
+            switchItem=TrayMenuStyle.Add(menu,"","V",delegate(object s,EventArgs e) { Toggle(); });
+            pauseItem=TrayMenuStyle.Add(menu,UiText.T("Tạm dừng hoàn toàn: game / remote"),"Ⅱ",null);
+            pauseItem.CheckOnClick=true;
             pauseItem.CheckedChanged+=delegate { manualPause=pauseItem.Checked; SyncPerformance(); UpdateMode(); };
-            menu.Items.Add(pauseItem);
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(UiText.T("Từ điển tiếng Anh")+"...",null,delegate { EditDictionary(false); });
-            menu.Items.Add(UiText.T("Ưu tiên Telex")+"...",null,delegate { EditDictionary(true); });
-            menu.Items.Add(UiText.T("↻  Nạp lại từ điển"),null,delegate { EnglishLexicon.Reload(); keyboard.SmartEnglish=keyboard.SmartEnglish; UpdateMode(); });
-            menu.Items.Add(UiText.T("⚙  Cài đặt nâng cao")+"...",null,delegate { OpenAdvanced(); });
-            menu.Items.Add(UiText.T("⚡  Gõ tắt & ứng dụng")+"...",null,delegate { OpenProductivity(); });
-            menu.Items.Add(UiText.T("⌘  Ký tự nhanh")+"...",null,delegate { OpenSymbols(); });
-            menu.Items.Add(UiText.T("Kiểm tra bản cập nhật..."),null,delegate {
+            TrayMenuStyle.Add(menu,UiText.T("Từ điển tiếng Anh")+"...","A",delegate(object s,EventArgs e) { OpenFlutterPage("englishDictionary"); });
+            TrayMenuStyle.Add(menu,UiText.T("Ưu tiên Telex")+"...","V",delegate(object s,EventArgs e) { OpenFlutterPage("vietnamesePriority"); });
+            TrayMenuStyle.Add(menu,UiText.T("↻  Nạp lại từ điển"),"↻",delegate(object s,EventArgs e) { EnglishLexicon.Reload(); keyboard.SmartEnglish=keyboard.SmartEnglish; UpdateMode(); });
+            TrayMenuStyle.Add(menu,UiText.T("⚙  Cài đặt nâng cao")+"...","⚙",delegate(object s,EventArgs e) { OpenFlutterPage("settings"); });
+            TrayMenuStyle.Add(menu,UiText.T("Gõ tắt")+"...","+",delegate(object s,EventArgs e) { OpenFlutterPage("snippets"); });
+            TrayMenuStyle.Add(menu,UiText.T("Ứng dụng & process")+"...","▦",delegate(object s,EventArgs e) { OpenFlutterPage("applications"); });
+            TrayMenuStyle.Add(menu,UiText.T("⌘  Ký tự nhanh")+"...","Ω",delegate(object s,EventArgs e) { OpenFlutterPage("symbols"); });
+            menu.Items.Add(new ToolStripSeparator());
+            TrayMenuStyle.Add(menu,UiText.T("Khôi phục hook bàn phím"),"↻",delegate(object s,EventArgs e) { RepairInputHooks(true); });
+            TrayMenuStyle.Add(menu,UiText.T("Kiểm tra bản cập nhật..."),"↻",delegate(object s,EventArgs e) {
                 try {
                     System.Diagnostics.Process.Start("https://github.com/muahacodon321-boop/TelexMiniMac/releases");
                 } catch(Exception ex) {
                     MessageBox.Show(this,ex.Message,"TelexMini",MessageBoxButtons.OK,MessageBoxIcon.Information);
                 }
             });
-            menu.Items.Add(UiText.T("Mở TelexMini"),null,delegate { OpenSharedUiOrFallback(); });
-            menu.Items.Add(new ToolStripSeparator()); menu.Items.Add(UiText.T("Thoát"),null,delegate { Close(); });
+            TrayMenuStyle.Add(menu,UiText.T("Chẩn đoán & sao lưu"),"✓",delegate(object s,EventArgs e) { OpenFlutterPage("diagnostics"); });
+            TrayMenuStyle.Add(menu,UiText.T("Mở TelexMini"),"T",delegate(object s,EventArgs e) { OpenSharedUiOrFallback(); });
+            menu.Items.Add(new ToolStripSeparator());
+            TrayMenuStyle.Add(menu,UiText.T("Thoát"),"×",delegate(object s,EventArgs e) { Close(); });
+            menu.Opening+=delegate { TrayMenuStyle.ApplyTheme(menu,UserPreferences.Bool("DarkTheme",false)); };
             tray=new NotifyIcon { Icon=vietIcon, Text=UiText.T("Telex Mini — Tiếng Việt"), ContextMenuStrip=menu, Visible=true };
             tray.MouseClick+=delegate(object sender, MouseEventArgs e) {
                 if(e.Button==MouseButtons.Left) OpenSharedUiOrFallback();
@@ -104,12 +129,73 @@ namespace TelexMini
             // Only the explicit hide button sends this window to the tray.
             keyboard.InjectionFailed+=delegate { BeginInvoke((Action)delegate { tray.ShowBalloonTip(3500,UiText.T("Không thay được ký tự"),UiText.T("Ứng dụng đích có thể đang chạy quyền quản trị. Xem HUONG-DAN.md."),ToolTipIcon.Info); }); };
             RegisterShortcut();
-            modeTimer=new System.Windows.Forms.Timer { Interval=150 };
+            lastExclusionPolicy=UserPreferences.String("ExcludedApps","");
+            modeTimer=new System.Windows.Forms.Timer { Interval=800 };
             gameGuard=new GameGuard(delegate(bool active) { gameActive=active; SyncPerformance(); UpdateMode(); });
-            modeTimer.Tick+=delegate { RefreshExternalSettings(); gameGuard.Check(); UpdateMode(); }; modeTimer.Start();
-            RebuildChrome();
+            modeTimer.Tick+=delegate { RefreshExternalSettings(); gameGuard.Check(); UpdateMode(); ServeDiagnosticsRequest(); }; modeTimer.Start();
+            AttachRuntimeNotifications();
+            if(!sharedUiInstalled)RebuildChrome();
             SyncPerformance();
             UpdateMode();
+        }
+        void AttachRuntimeNotifications() {
+            try {
+                focusEventProc=OnNativeFocusChanged;
+                foregroundEventHook=Native.SetWinEventHook(0x0003,0x0003,IntPtr.Zero,focusEventProc,0,0,0);
+                focusEventHook=Native.SetWinEventHook(0x8005,0x8005,IntPtr.Zero,focusEventProc,0,0,0);
+            } catch(System.ComponentModel.Win32Exception) {}
+            try {
+                Directory.CreateDirectory(AppStorage.DirectoryPath);
+                preferencesWatcher=new FileSystemWatcher(AppStorage.DirectoryPath,"preferences.ini") {
+                    NotifyFilter=NotifyFilters.LastWrite|NotifyFilters.FileName|NotifyFilters.CreationTime,
+                    SynchronizingObject=this
+                };
+                preferencesWatcher.Changed+=OnPreferencesFileChanged;
+                preferencesWatcher.Created+=OnPreferencesFileChanged;
+                preferencesWatcher.Renamed+=OnPreferencesFileChanged;
+                preferencesWatcher.EnableRaisingEvents=true;
+            } catch(IOException) {} catch(UnauthorizedAccessException) {}
+            SystemEvents.SessionSwitch+=OnWindowsSessionSwitch;
+            SystemEvents.PowerModeChanged+=OnWindowsPowerMode;
+        }
+        void OnPreferencesFileChanged(object sender,FileSystemEventArgs args) {
+            if(cleaned)return;
+            RefreshExternalSettings();
+            UpdateMode();
+        }
+        void OnNativeFocusChanged(IntPtr hook,uint eventType,IntPtr window,
+                                  int objectId,int childId,uint thread,uint time) {
+            if(cleaned)return;
+            if(eventType==0x0003 && gameGuard!=null) gameGuard.Check();
+            if(context!=null) context.RequestCheck();
+            UpdateMode();
+        }
+        void OnWindowsSessionSwitch(object sender,SessionSwitchEventArgs args) {
+            if(args.Reason!=SessionSwitchReason.SessionUnlock &&
+               args.Reason!=SessionSwitchReason.ConsoleConnect &&
+               args.Reason!=SessionSwitchReason.RemoteConnect)return;
+            RequestSafeHookRecovery();
+        }
+        void OnWindowsPowerMode(object sender,PowerModeChangedEventArgs args) {
+            if(args.Mode==PowerModes.Resume)RequestSafeHookRecovery();
+        }
+        void RequestSafeHookRecovery() {
+            if(cleaned || !IsHandleCreated)return;
+            try {
+                BeginInvoke((Action)delegate { if(!cleaned)RepairInputHooks(false); });
+            } catch(InvalidOperationException) {}
+        }
+        void RepairInputHooks(bool notify) {
+            bool ok=keyboard.TryRepairHooks();
+            SyncPerformance();
+            context.RequestCheck();
+            UpdateMode();
+            if(notify && tray!=null) {
+                tray.ShowBalloonTip(1700,"TelexMini",ok ?
+                    "Hook đã được khởi tạo lại (không thay đổi chế độ V/E)." :
+                    "Windows chưa cho phép khởi tạo hook; phím gốc vẫn được chuyển tiếp.",
+                    ok ? ToolTipIcon.Info : ToolTipIcon.Warning);
+            }
         }
         void RebuildChrome() {
             chrome=new ModernChrome(this,toggle,status,autoEnglish,restoreWords,smartEnglish,hide,exit,
@@ -136,8 +222,10 @@ namespace TelexMini
             finally {SyncPerformance();UpdateMode();}
         }
         void RegisterShortcut() {
-            if(registered) Native.UnregisterHotKey(Handle,1);
             string chosen=UserPreferences.String("Hotkey","Ctrl + Shift + Space");
+            if(registered && chosen==activeHotkey)return;
+            if(registered) Native.UnregisterHotKey(Handle,1);
+            activeHotkey=chosen;
             uint modifiers=0x4006;uint key=0x20;
             if(chosen=="Ctrl + Alt + V") { modifiers=0x4003;key=0x56; }
             else if(chosen=="Alt + Shift + V") { modifiers=0x4005;key=0x56; }
@@ -213,7 +301,30 @@ namespace TelexMini
             context.Enabled=!pause;
         }
         void OpenSharedUiOrFallback() {
-            if(!SharedUiLauncher.OpenOrActivate()) RestoreWindow();
+            if(SharedUiLauncher.OpenOrActivate())return;
+            if(sharedUiInstalled) {
+                if(tray!=null)tray.ShowBalloonTip(2200,"TelexMini",
+                    "Không mở được Flutter Settings. Bộ gõ trong tray vẫn chạy.",
+                    ToolTipIcon.Warning);
+            } else RestoreWindow();
+        }
+        void ServeDiagnosticsRequest() {
+            // Respond on demand; only timing aggregates, never keys or text.
+            try {
+                string folder=AppStorage.DirectoryPath;
+                string request=Path.Combine(folder,"diagnostics.request");
+                if(!File.Exists(request)) return;
+                File.Delete(request);
+                File.WriteAllText(Path.Combine(folder,"diagnostics.metrics"),keyboard.HookDiagnostics(),new UTF8Encoding(false));
+            } catch(IOException) {} catch(UnauthorizedAccessException) {}
+        }
+        void OpenFlutterPage(string page) {
+            try {
+                string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"TelexMini","FlutterUI");
+                Directory.CreateDirectory(folder);
+                File.WriteAllText(Path.Combine(folder,"navigation.txt"),page,new UTF8Encoding(false));
+            } catch(IOException) {} catch(UnauthorizedAccessException) {}
+            OpenSharedUiOrFallback();
         }
         void RestoreWindow() {
             if(!Visible) Show();
@@ -235,6 +346,7 @@ namespace TelexMini
             if(preferencesChanged) {
                 bool enabled=UserPreferences.Bool("VietnameseEnabled",true);
                 if(keyboard.Enabled!=enabled)keyboard.Enabled=enabled;
+                keyboard.SyncBackend();
                 AdvancedSettings.ApplyAutoStart(UserPreferences.Bool("AutoStart",false));
                 autoEnglish.Checked=UserPreferences.Bool("AutoEnglish",autoEnglish.Checked);
                 restoreWords.Checked=UserPreferences.Bool("RestoreInvalid",restoreWords.Checked);
@@ -250,9 +362,19 @@ namespace TelexMini
                 keyboard.ReloadProductivity();
                 RegisterShortcut();
                 if(chrome!=null)chrome.ReloadTheme();
-                context.RequestCheck();
+                string exclusions=UserPreferences.String("ExcludedApps","");
+                if(lastExclusionPolicy!=exclusions) {
+                    lastExclusionPolicy=exclusions;
+                    gameGuard.RefreshPolicy();
+                    context.RequestCheck();
+                }
             }
-            if(dictionaryChanged)context.RequestCheck();
+            if(dictionaryChanged) {
+                // Snippet/profile changes signal the same reload flag; do not
+                // invalidate password focus metadata for a dictionary edit.
+                keyboard.ReloadProductivity();
+                keyboard.ReloadNativeDictionary();
+            }
         }
         void UpdateMode()
         {
@@ -311,11 +433,22 @@ namespace TelexMini
                 cleaned=true;
                 if(registered && IsHandleCreated) Native.UnregisterHotKey(Handle,1);
                 registered=false;
+                SystemEvents.SessionSwitch-=OnWindowsSessionSwitch;
+                SystemEvents.PowerModeChanged-=OnWindowsPowerMode;
+                if(preferencesWatcher!=null)preferencesWatcher.Dispose();
+                if(foregroundEventHook!=IntPtr.Zero)Native.UnhookWinEvent(foregroundEventHook);
+                if(focusEventHook!=IntPtr.Zero)Native.UnhookWinEvent(focusEventHook);
                 if(modeTimer!=null) modeTimer.Dispose();
                 if(gameGuard!=null) gameGuard.Dispose();
                 if(keyboard!=null) keyboard.Dispose();
                 if(context!=null) context.Dispose();
                 if(tray!=null) { tray.Visible=false; if(tray.ContextMenuStrip!=null) tray.ContextMenuStrip.Dispose(); tray.Dispose(); }
+                if(sharedUiInstalled) {
+                    // Unparented config controls have no WinForms owner to
+                    // dispose them when the tray engine finally exits.
+                    foreach(Control item in new Control[] {toggle,status,hide,exit,autoEnglish,restoreWords,smartEnglish})
+                        if(item!=null)item.Dispose();
+                }
                 if(vietIcon!=null) vietIcon.Dispose(); if(englishIcon!=null) englishIcon.Dispose();
             }
             base.Dispose(disposing);

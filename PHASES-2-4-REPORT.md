@@ -26,6 +26,14 @@ Policy: commit only after tests; DO NOT push without a separate request.
 - Update menu/button opens the public GitHub Releases page on user request. **No unattended download, auto-install or verified silent updater**; these would require a signed update channel.
 - English/Vietnamese UI selector and translations for the primary macOS preferences controls are in place. Windows and some secondary macOS text remain Vietnamese: **full localization is not complete**.
 
+## Windows responsiveness, window restore and icon polish (2026-11-15)
+- Manual V/E mode switches no longer stop the input-context monitor. The monitor keeps the current control classification warm while English pass-through is selected; the keyboard hook can be re-enabled without waiting for a fresh UI Automation query.
+- Cached classifications are bound to the exact foreground window, focused HWND, process ID and focus revision. A changed field or a resumed game/remote session invalidates the cache and remains fail-closed until reclassified, preserving password protection.
+- The focus metadata worker checks at 150 ms intervals but skips UI Automation when the exact focused control is unchanged. The Windows test measured 10,000 cached focus lookups at 0 ms (coarse timer resolution; not a real-world keystroke latency guarantee).
+- Standard Windows minimize now remains on the taskbar. The explicit “Thu xuống khay” action hides to the notification area; left/double-clicking the tray icon and launching a second instance restore the existing main window.
+- The tray and main taskbar/title-bar icon show a large V/E state glyph. The executable retains the TelexMini monogram icon. Dictionary, advanced settings, productivity and symbol-picker windows now share the branded icon.
+- Windows sidebar navigation returns to Overview after closing a modal editor; the language card is covered by layout assertions.
+
 ## Automated tests and builds
 - macOS Apple Silicon: **8,147 assertions, 0 failures** including 4,700 explicit Unicode oracle cases (Telex + VNI), 3,000 deterministic stress compositions, old regression cases, simulated multiword IMK composition, snippet/profile validation, date macro and spelling suggestions.
 - Windows WinForms/.NET Framework: **Failures: 0**. All 4,700 oracle cases replayed into an isolated scratch document model via the same `TextEditPlan` as the actual hook; app context, productivity dialog, symbol picker, dictionary UI, config synchronization and offline suggestion tests passed.

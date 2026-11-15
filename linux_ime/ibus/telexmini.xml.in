@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component>
+  <name>org.freedesktop.IBus.TelexMini</name>
+  <description>TelexMini Vietnamese Input</description>
+  <exec>@CMAKE_INSTALL_FULL_LIBEXECDIR@/telexmini-ibus --ibus</exec>
+  <version>2.4.0</version>
+  <license>Proprietary - local build preview</license>
+  <author>TelexMini</author>
+  <homepage></homepage>
+  <textdomain>telexmini</textdomain>
+  <engines>
+    <engine>
+      <name>telexmini</name>
+      <longname>TelexMini Vietnamese</longname>
+      <language>vi</language>
+      <license>Proprietary - local build preview</license>
+      <author>TelexMini</author>
+      <icon>input-keyboard</icon>
+      <layout>us</layout>
+      <symbol>Vi</symbol>
+      <description>Vietnamese Telex/VNI input method</description>
+    </engine>
+  </engines>
+</component>

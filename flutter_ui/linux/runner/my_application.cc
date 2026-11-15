@@ -270,6 +270,13 @@ static void my_application_activate(GApplication* application) {
   gtk_window_set_icon_name(window, "telexmini");
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
+  // Flutter 3.47+ defaults to Impeller on Linux. VMware SVGA3D/other virtual
+  // GPUs can render badly corrupted text and incomplete frames with Impeller.
+  // Skia still uses accelerated OpenGL on supported physical GPUs. Users
+  // can explicitly opt back into Impeller after validating their GPU.
+  if (g_strcmp0(g_getenv("TELEXMINI_ENABLE_IMPELLER"), "1") != 0) {
+    fl_dart_project_set_enable_impeller(project, FALSE);
+  }
   fl_dart_project_set_dart_entrypoint_arguments(project, self->dart_entrypoint_arguments);
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;
@@ -283,7 +290,8 @@ static void my_application_activate(GApplication* application) {
 
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
   self->telexmini_channel = fl_method_channel_new(
-      fl_view_get_binary_messenger(view), "com.telexmini/control",
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "com.telexmini/control",
       FL_METHOD_CODEC(codec));
   fl_method_channel_set_method_call_handler(
       self->telexmini_channel, telexmini_method_call_cb, self, NULL);

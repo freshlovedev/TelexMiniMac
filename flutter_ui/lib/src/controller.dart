@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-enum AppPage { overview, englishDictionary, vietnamesePriority, snippets, symbols, settings }
+enum AppPage { overview, englishDictionary, vietnamesePriority, snippets, symbols, applications, settings }
 
 class AppController extends ChangeNotifier {
   AppController({this.settingsDirectoryOverride});
@@ -35,6 +35,7 @@ class AppController extends ChangeNotifier {
   String excludedApps = '';
   String previewText = '';
   String snippetText = '';
+  String profilesText = '';
   final List<String> englishWords = [];
   final List<String> vietnameseWords = [];
   final List<String> symbols = ['→','←','↑','↓','↔','✓','✕','★','☆','♥','©','®','™','°','±','∞','≠','≤','≥','…','—','·','€','£'];
@@ -59,6 +60,7 @@ class AppController extends ChangeNotifier {
     hotkey = data['hotkey'] as String? ?? 'Ctrl + Shift + Space';
     excludedApps = data['excludedApps'] as String? ?? '';
     snippetText = data['snippetText'] as String? ?? '';
+    profilesText = data['profilesText'] as String? ?? '';
     englishWords
       ..clear()
       ..addAll((data['englishWords'] as List<dynamic>? ?? englishWords).cast<String>());
@@ -76,6 +78,7 @@ class AppController extends ChangeNotifier {
       final vietnamese = await _channel.invokeListMethod<String>('loadDictionary', {'vietnamese': true});
       if (english != null) englishWords..clear()..addAll(english);
       if (vietnamese != null) vietnameseWords..clear()..addAll(vietnamese);
+      profilesText = await _channel.invokeMethod<String>('loadProfiles') ?? profilesText;
     } on MissingPluginException {
       nativeConnected = false;
     } on PlatformException {
@@ -144,6 +147,7 @@ class AppController extends ChangeNotifier {
     'hotkey': hotkey,
     'excludedApps': excludedApps,
     'snippetText': snippetText,
+    'profilesText': profilesText,
     'englishWords': englishWords,
     'vietnameseWords': vietnameseWords,
   };
@@ -160,6 +164,45 @@ class AppController extends ChangeNotifier {
     }
     await _LocalSettings.write(settings, settingsDirectoryOverride);
     notifyListeners();
+  }
+
+  Future<List<String>> runningProcesses() async {
+    try {
+      final names = await _channel.invokeListMethod<String>('listProcesses') ?? <String>[];
+      return names.toSet().toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    } on MissingPluginException {
+      return [];
+    } on PlatformException {
+      return [];
+    }
+  }
+
+  static bool validProcessName(String name) {
+    final pattern = RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,254}');
+    if (pattern.stringMatch(name) != name) return false;
+    return !Platform.isWindows || name.toLowerCase().endsWith('.exe');
+  }
+
+  Future<void> saveProfiles(String text) async {
+    final lines = <String>[];
+    final seen = <String>{};
+    for (final raw in text.split('\n')) {
+      if (raw.trim().isEmpty) continue;
+      final fields = raw.trim().split('\t');
+      if (fields.length != 2 ||
+          !validProcessName(fields[0]) ||
+          !['English', 'Vietnamese', 'Balanced'].contains(fields[1]) ||
+          !seen.add(fields[0].toLowerCase())) {
+        throw const FormatException('Invalid application profile');
+      }
+      lines.add(fields.join('\t'));
+    }
+    if (lines.length > 200) throw const FormatException('Too many profiles');
+    final normalized = lines.join('\n');
+    await _channel.invokeMethod<void>('saveProfiles', {'text': normalized});
+    profilesText = normalized;
+    await save();
   }
 
   Future<void> setVietnameseEnabled(bool value) async {

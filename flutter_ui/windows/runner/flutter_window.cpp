@@ -1,6 +1,10 @@
 #include "flutter_window.h"
 
 #include <windows.h>
+#include <tlhelp32.h>
+#include <set>
+#include <sstream>
+#include <iterator>
 
 #include <algorithm>
 #include <cctype>
@@ -180,6 +184,80 @@ void HandleTelexMiniMethodCall(
   const auto* arguments = call.arguments()
       ? std::get_if<EncodableMap>(call.arguments())
       : nullptr;
+  if (call.method_name() == "listProcesses") {
+    EncodableList names;
+    std::set<std::wstring> unique;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot != INVALID_HANDLE_VALUE) {
+      PROCESSENTRY32W entry{};
+      entry.dwSize = sizeof(entry);
+      if (Process32FirstW(snapshot, &entry)) {
+        do {
+          const std::wstring name(entry.szExeFile);
+          if (name.empty() || name.size() > 255) continue;
+          unique.insert(name);
+        } while (Process32NextW(snapshot, &entry));
+      }
+      CloseHandle(snapshot);
+    }
+    // Process executable names are converted to UTF-8 without touching
+    // command lines, window contents, or keystrokes.
+    for (const auto& wide : unique) {
+      const int count = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(),
+                                          static_cast<int>(wide.size()), nullptr, 0,
+                                          nullptr, nullptr);
+      if (count <= 0) continue;
+      std::string name(static_cast<size_t>(count), '\0');
+      WideCharToMultiByte(CP_UTF8, 0, wide.c_str(),
+                          static_cast<int>(wide.size()), name.data(), count,
+                          nullptr, nullptr);
+      names.emplace_back(name);
+    }
+    result->Success(EncodableValue(names));
+    return;
+  }
+  if (call.method_name() == "loadProfiles") {
+    std::ifstream input(DataDirectory() / L"profiles.tsv", std::ios::binary);
+    std::string contents((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+    result->Success(EncodableValue(contents));
+    return;
+  }
+  if (call.method_name() == "saveProfiles") {
+    const auto text = ReadString(arguments, "text");
+    if (!text || text->size() > 65536) {
+      result->Error("BAD_ARGUMENT", "Invalid profile data.");
+      return;
+    }
+    std::set<std::string> names;
+    std::istringstream lines(*text);
+    std::string row;
+    while (std::getline(lines, row)) {
+      if (row.empty()) continue;
+      const auto tab = row.find('\t');
+      if (tab == std::string::npos || row.find('\t', tab + 1) != std::string::npos) {
+        result->Error("BAD_ARGUMENT", "Profile rows require one tab.");
+        return;
+      }
+      const std::string name = row.substr(0, tab);
+      const std::string mode = row.substr(tab + 1);
+      const bool valid = !name.empty() && name.size() <= 255 &&
+        name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") == std::string::npos &&
+        name.size() >= 5 && name.substr(name.size()-4) == ".exe" &&
+        (mode == "English" || mode == "Vietnamese" || mode == "Balanced");
+      if (!valid || !names.insert(name).second) {
+        result->Error("BAD_ARGUMENT", "Invalid or duplicate process profile.");
+        return;
+      }
+    }
+    if (!WriteTextFile(L"profiles.tsv", *text)) {
+      result->Error("LOCAL_STORAGE", "Cannot save profiles.");
+      return;
+    }
+    SignalEngineReload();
+    result->Success(EncodableValue());
+    return;
+  }
   if (call.method_name() == "getStatus") {
     const auto values = ReadSettings();
     const auto found = values.find("VietnameseEnabled");

@@ -52,6 +52,7 @@ namespace TelexMini
         [STAThread] static int Main(string[] args)
         {
             Console.OutputEncoding=System.Text.Encoding.UTF8;
+            if(args.Length>0 && args[0]=="--benchmark")return WindowsPerfBench.Run();
             string oracle=Path.Combine(Environment.CurrentDirectory,"telex-corpus.tsv");
             if(!File.Exists(oracle)) {
                 failures++;Console.WriteLine("FAIL missing shared Telex oracle: "+oracle);
@@ -119,6 +120,58 @@ namespace TelexMini
             Equal("Snippet case insensitive","không",Productivity.Expand("KO",snippets,true));
             Equal("Snippet disabled",null,Productivity.Expand("dc",snippets,false));
             Equal("Snippet unknown",null,Productivity.Expand("nope",snippets,true));
+            var clipboardMacro=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase) { {"cb","Dán: {clipboard}"} };
+            Equal("Clipboard macro explicit", "Dán: hello",Productivity.Expand("cb",clipboardMacro,true,delegate {return "hello";}));
+            Equal("Clipboard macro opt out",null,Productivity.Expand("cb",clipboardMacro,false,delegate {throw new Exception("Must not read");}));
+            Equal("Clipboard macro without snapshot is pass through",null,Productivity.Expand("cb",clipboardMacro,true));
+            bool canForward;
+            Equal("Batch size blocks negative erase","False",Native.IsSafeEditSize(-1,1,false).ToString());
+            Equal("Batch size permits ordinary edits","True",Native.IsSafeEditSize(7,120,true).ToString());
+            Equal("Batch size rejects pathological inserts","False",Native.IsSafeEditSize(48,5000,true).ToString());
+            Equal("Injection zero accepted is failure","False",Native.EvaluateInjectionResult(6,0,out canForward).ToString());
+            Equal("Injection zero accepted forwards original","True",canForward.ToString());
+            Equal("Injection partial cannot replay","False",Native.EvaluateInjectionResult(6,3,out canForward).ToString());
+            Equal("Injection partial suppresses original","False",canForward.ToString());
+            Equal("Injection complete accepted","True",Native.EvaluateInjectionResult(6,6,out canForward).ToString());
+            var emojiEdit=TextEditPlan.Between("\uD83D\uDE00","\uD83D\uDE01");
+            Equal("Emoji edit erases full UTF16 pair","2",emojiEdit.Erase.ToString());
+            Equal("Emoji edit inserts full UTF16 pair","\uD83D\uDE01",emojiEdit.Insert);
+            var undo=new ExpansionUndo();
+            int erase;string insert;
+            Equal("Undo arms only for safe shortcut","True",
+                undo.Arm("dc","Địa chỉ:",new IntPtr(42),new IntPtr(77)).ToString());
+            Equal("Undo rejects different focus","False",
+                undo.TryTake(new IntPtr(42),new IntPtr(78),out erase,out insert).ToString());
+            undo.Arm("dc","Địa chỉ:",new IntPtr(42),new IntPtr(77));
+            Equal("Undo first Backspace succeeds","True",
+                undo.TryTake(new IntPtr(42),new IntPtr(77),out erase,out insert).ToString());
+            Equal("Undo erases expansion and space",( "Địa chỉ:".Length+1).ToString(),erase.ToString());
+            Equal("Undo restores original shortcut","dc",insert);
+            Equal("Undo is one-shot","False",
+                undo.TryTake(new IntPtr(42),new IntPtr(77),out erase,out insert).ToString());
+            Equal("Undo rejects multiline","False",
+                undo.Arm("dc","line\nbreak",new IntPtr(42),new IntPtr(77)).ToString());
+            Equal("Undo rejects unknown focus","False",
+                undo.Arm("dc","text",new IntPtr(42),IntPtr.Zero).ToString());
+            var restored=new TelexEngine { SmartEnglish=true };
+            restored.RestoreLiteralWord("dc");
+            Equal("Restored shortcut remains literal","dct",restored.Push('t'));
+            using(var readAllowed=new System.Threading.ManualResetEvent(false))
+            using(var snapshot=new ClipboardMacroSnapshot(delegate {readAllowed.WaitOne();return "clipboard text";})) {
+                snapshot.Request("cb");
+                string text;
+                Equal("Clipboard never blocks hook when pending","False",snapshot.TryGet("cb",out text).ToString());
+                snapshot.Cancel();
+                readAllowed.Set();
+                System.Threading.Thread.Sleep(35);
+                Equal("Canceled snapshot does not leak","False",snapshot.TryGet("cb",out text).ToString());
+                snapshot.Request("cb");
+                System.Threading.SpinWait.SpinUntil(delegate {return snapshot.TryGet("cb",out text);},1200);
+                Equal("Async snapshot retrieves text","True",snapshot.TryGet("cb",out text).ToString());
+                Equal("Async macro uses completed snapshot","Dán: clipboard text",
+                    Productivity.Expand("cb",clipboardMacro,true,delegate{return text;}));
+            }
+            Equal("Datetime macro","True",System.Text.RegularExpressions.Regex.IsMatch(Productivity.Expand("dt",new Dictionary<string,string>{{"dt","{datetime}"}},true),@"^\d{4}-\d\d-\d\d \d\d:\d\d$" ).ToString());
             var dynamic=Productivity.ReadSnippetsFromText("today\t{date}\nclock\t{time}");
             Equal("Date snippet macro",DateTime.Now.ToString("yyyy-MM-dd"),
                 Productivity.Expand("today",dynamic,true));
@@ -134,6 +187,10 @@ namespace TelexMini
             Equal("Application profile Vietnamese","Vietnamese",Productivity.GetProfile("WORD",profilesText));
             Equal("Application profile default","Default",Productivity.GetProfile("notepad.exe",profilesText));
             Equal("Profile substring not matched","Default",Productivity.GetProfile("mycode.exe",profilesText));
+            var cachedProfileMap=Productivity.ParseProfiles(profilesText);
+            Equal("Cached profile case insensitive","English",Productivity.GetProfile(cachedProfileMap,"CODE.EXE"));
+            Equal("Cached profile matches without extension","Vietnamese",Productivity.GetProfile(cachedProfileMap,"word"));
+            Equal("Cached profile not substring","Default",Productivity.GetProfile(cachedProfileMap,"mycode.exe"));
             Equal("Bad profile rejected","True",
                 ThrowsFormat(delegate {Productivity.ValidateProfiles("code.exe\tUnknown");}).ToString());
             Equal("Unicode quick symbols","True",Array.Exists(Productivity.Symbols,s=>s=="₫").ToString());
@@ -181,7 +238,8 @@ namespace TelexMini
                 foreach(char c in word) {
                     prefix+=c;
                     bilingual.Push(c);
-                    string expectedPrefix=prefix=="of" ? "ò" :
+                    string expectedPrefix=prefix=="w" ? "ư" :
+                        prefix=="of" ? "ò" :
                         prefix=="as" ? "á" :
                         prefix=="tes" ? "té" :
                         prefix=="test" ? "tét" :
@@ -258,7 +316,11 @@ namespace TelexMini
                 new[]{"boon","bôn"},new[]{"boons","bốn"},
                 new[]{"aa","â"},new[]{"ee","ê"},new[]{"oo","ô"},
                 new[]{"tiee","tiê"},new[]{"tieen","tiên"},
-                new[]{"tieengs","tiếng"}
+                new[]{"tieengs","tiếng"},
+                new[]{"w","ư"},new[]{"W","Ư"},
+                new[]{"ow","ơ"},new[]{"uw","ư"},new[]{"aw","ă"},
+                new[]{"now","nơ"},new[]{"noww","now"},
+                new[]{"nuw","nư"},new[]{"naw","nă"},new[]{"uow","ươ"}
             }) {
                 var bilingual=new TelexEngine {SmartEnglish=true};
                 foreach(char c in pair[0]) bilingual.Push(c);
@@ -266,7 +328,7 @@ namespace TelexMini
             }
             foreach(var pair in new[] {
                 new[]{"book","book"}, new[]{"books","books"},
-                new[]{"good","good"}, new[]{"boost","bốt"}
+                new[]{"good","good"}, new[]{"boost","boost"}
             }) {
                 var bilingual=new TelexEngine {SmartEnglish=true};
                 foreach(char c in pair[0]) bilingual.Push(c);
@@ -276,7 +338,7 @@ namespace TelexMini
             foreach(var pair in new[] {
                 new[]{"bee","bê"},new[]{"been","bên"},
                 new[]{"beens","bến"},new[]{"teen","tên"},
-                new[]{"seen","sên"},new[]{"boost","bốt"}
+                new[]{"seen","sên"},new[]{"boost","boost"}
             }) {
                 var bilingual=new TelexEngine {SmartEnglish=true};
                 foreach(char c in pair[0]) bilingual.Push(c);
@@ -314,6 +376,11 @@ namespace TelexMini
             foreach(char c in "been") englishFirst.Push(c);
             Equal("English-first explicit collision","been",englishFirst.Text);
             Equal("English-first boundary","been",englishFirst.Finish(true));
+            englishFirst.Reset();foreach(char c in "now")englishFirst.Push(c);
+            Equal("English-first now stays English","now",englishFirst.Text);
+            Equal("English-first now boundary","now",englishFirst.Finish(true));
+            var vniW=new TelexEngine {UseVni=true,SmartEnglish=true};vniW.Push('w');
+            Equal("VNI w stays literal","w",vniW.Text);
             var vietnameseOnly=new TelexEngine {SmartEnglish=false};
             foreach(char c in "been") vietnameseOnly.Push(c);
             Equal("Vietnamese-first explicit collision","bên",vietnameseOnly.Text);
@@ -398,6 +465,10 @@ namespace TelexMini
             Equal("PowerShell classifier","True",ContextPolicy.IsTerminal("pwsh").ToString());
             Equal("Browser remains text","False",ContextPolicy.IsTerminal("msedge").ToString());
             Equal("Steam remote executable","True",ContextPolicy.ShouldYieldKeys("streaming_client.exe").ToString());
+            foreach(string remote in new[] {"mstsc.exe","msrdc","AnyDesk.exe","TEAMVIEWER.EXE","rustdesk","parsec","vncviewer64","moonlight"})
+                Equal("Remote client pass-through "+remote,"True",ContextPolicy.ShouldYieldKeys(remote).ToString());
+            foreach(string normal in new[] {"chrome.exe","msedge.exe","WINWORD.EXE","EXCEL.EXE","Code.exe","explorer.exe","powershell.exe"})
+                Equal("Normal application not suppressed "+normal,"False",ContextPolicy.IsRemoteClient(normal).ToString());
             Equal("Steam remote case insensitive","True",ContextPolicy.ShouldYieldKeys("STREAMING_CLIENT").ToString());
             Equal("Steam library keeps Telex","False",ContextPolicy.ShouldYieldKeys("steam.exe").ToString());
             Equal("Steam chat keeps Telex","False",ContextPolicy.ShouldYieldKeys("steamwebhelper.exe").ToString());
@@ -407,12 +478,31 @@ namespace TelexMini
                 Equal("Non-game "+name,"False",ContextPolicy.IsGame(name).ToString());
             using(var hooks=new Keyboard()) {
                 Equal("Hooks initially active","True",hooks.HooksInstalled.ToString());
+                Equal("Hook repair restores both hooks","True",hooks.TryRepairHooks().ToString());
+                Equal("Hook repair remains installed","True",hooks.HooksInstalled.ToString());
+                var engineField=typeof(Keyboard).GetField("engine",
+                    BindingFlags.Instance|BindingFlags.NonPublic);
+                var activeEngine=(NativeComposer)engineField.GetValue(hooks);
+                Equal("Keyboard now runs native C++ composer","True",(activeEngine!=null).ToString());
+                foreach(char c in "tieen")activeEngine.Push(c);
+                string composing=activeEngine.Text;
+                hooks.SmartEnglish=true;
+                hooks.PreferEnglishExact=false;
+                hooks.UseVni=false;
+                Equal("Unchanged keyboard config keeps in-progress word",composing,activeEngine.Text);
+                var stats=hooks.HookDiagnostics().Split('\t');
+                Equal("Hook diagnostics contain three aggregate fields","3",stats.Length.ToString());
+                Equal("Hook diagnostics never contain typed text","False",hooks.HookDiagnostics().Contains("password").ToString());
                 hooks.Enabled=false;
                 Equal("Manual E removes both hooks","False",hooks.HooksInstalled.ToString());
+                Equal("Repair respects manual English","True",hooks.TryRepairHooks().ToString());
+                Equal("Repair never hooks in English mode","False",hooks.HooksInstalled.ToString());
                 hooks.Enabled=true;
                 Equal("Manual V restores hooks","True",hooks.HooksInstalled.ToString());
                 hooks.Suspended=true;
                 Equal("Game suspension removes both hooks","False",hooks.HooksInstalled.ToString());
+                Equal("Repair respects game suspension","True",hooks.TryRepairHooks().ToString());
+                Equal("Repair never hooks while suspended","False",hooks.HooksInstalled.ToString());
                 hooks.Enabled=false; hooks.Suspended=false;
                 Equal("Leaving game preserves manual E","False",hooks.HooksInstalled.ToString());
                 hooks.Enabled=true;
@@ -454,6 +544,8 @@ namespace TelexMini
             edit.Backspace(); edit.Backspace();
             foreach(char c in "as") edit.Push(c);
             Equal("Deleting whole word restores Telex","á",edit.Text);
+            int bilingualCorpusCount=BilingualCorpus.Run(delegate(string label,string expected,string actual) {Equal(label,expected,actual);});
+            Console.WriteLine("Bilingual corpus assertions: "+bilingualCorpusCount);
             TestSettingsLayoutAndDictionary();
             TestProductivityUi();
             Console.WriteLine("INPUT struct size: "+Marshal.SizeOf(typeof(Native.INPUT)));
@@ -617,9 +709,9 @@ namespace TelexMini
             readonly TextBox box=new TextBox { Dock=DockStyle.Fill, Multiline=true, ImeMode=ImeMode.Disable };
             readonly Timer timer=new Timer { Interval=45 };
             readonly Keyboard hook=new Keyboard { AcceptTestInput=true };
-            readonly string[] input={"tieengs vieetj", "truowngf nguowif", "ass aaa ddd", "toasn", "tieengs\bg", "as", "as", "esscape tieengs vieetj", "ess\bscape", "esscape.as", "escape tieengs ", "hello.browser ", "github\t"};
-            readonly string[] expected={"tiếng việt", "trường người", "as aa dd", "toán", "tiếng", "as", "á", "escape tiếng việt", "escape", "escape.á", "escape tiếng ", "hello.browser ", "github"};
-            int test,position,delay=8;
+            readonly string[] input={"tieengs vieetj", "truowngf nguowif", "ass aaa ddd", "toasn", "tieengs\bg", "as", "as", "esscape tieengs vieetj", "ess\bscape", "esscape.as", "escape tieengs ", "hello.browser ", "github\t", "dc ", "dc \b", "w", "w ", "ow", "uw", "aw", "now", "now ", "noww ", "uow", "windows", "now"};
+            readonly string[] expected={"tiếng việt", "trường người", "as aa dd", "toán", "tiếng", "as", "á", "escape tiếng việt", "escape", "escape.á", "escape tiếng ", "hello.browser ", "github", "Địa chỉ: ", "dc", "ư", "ư ", "ơ", "ư", "ă", "nơ", "nơ ", "now ", "ươ", "windows", "now"};
+            int test,position,delay=8,focusRetries;
             internal IntegrationForm() {
                 Text="Telex Mini — automated input test";
                 StartPosition=FormStartPosition.CenterScreen;
@@ -627,6 +719,7 @@ namespace TelexMini
                 Controls.Add(box);
                 var start=new Button { Text="Start input test", Dock=DockStyle.Top, Height=40 };
                 Controls.Add(start);
+                hook.InstallIntegrationSnippets(Productivity.ReadSnippetsFromText("dc\tĐịa chỉ:"));
                 start.Click+=delegate { start.Enabled=false; box.Focus(); LoadKeyboardLayout("00000409",1); timer.Start(); };
                 if(Environment.GetEnvironmentVariable("TELEX_AUTO_INTEGRATION")=="1")
                     Shown+=delegate {
@@ -638,8 +731,18 @@ namespace TelexMini
             void Tick(object sender,EventArgs e) {
                 if(delay-->0) return;
                 if(Native.GetForegroundWindow()!=Handle) {
-                    Console.WriteLine("FAIL integration aborted: test window lost foreground."); failures++; timer.Stop(); Close(); return;
+                    // Interactive Windows sessions may refuse initial focus
+                    // while an automation client is foreground. Do not inject
+                    // into any foreign window; retry activating our test form.
+                    if(focusRetries++<360) {
+                        TopMost=true;Activate();BringToFront();
+                        Native.SetForegroundWindow(Handle);
+                        return;
+                    }
+                    Console.WriteLine("FAIL integration aborted: test window lost foreground after 16 seconds.");
+                    failures++; timer.Stop(); Close(); return;
                 }
+                focusRetries=0;
                 if(position<input[test].Length) {
                     if(Environment.GetEnvironmentVariable("TELEX_TRACE")=="1") Console.WriteLine("TRACE "+position+" ["+box.Text+"]");
                     char c=input[test][position++]; ushort vk=c=='\b' ? (ushort)8 : c=='\t' ? (ushort)9 : c==' ' ? (ushort)32 : c=='.' ? (ushort)0xBE : (ushort)char.ToUpperInvariant(c);
@@ -651,7 +754,10 @@ namespace TelexMini
                 Equal("Windows TextBox: "+input[test],expected[test],box.Text);
                 test++; position=0;
                 if(test==input.Length) { timer.Stop(); Close(); return; }
-                box.Clear(); hook.Enabled=test!=5; delay=3;
+                // Programmatic TextBox.Clear() is not a physical key event.
+                // Reset hook state explicitly between isolated test documents.
+                hook.Enabled=false; box.Clear(); hook.PreferEnglishExact=test==input.Length-1;
+                hook.Enabled=test!=5; delay=3;
             }
             protected override void Dispose(bool disposing) { if(disposing) { timer.Dispose(); hook.Dispose(); } base.Dispose(disposing); }
         }

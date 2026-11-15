@@ -24,9 +24,22 @@ Mở menu khay TelexMini:
 - **Kiểm tra bản cập nhật...**: chỉ mở GitHub Releases, KHÔNG tải/cài
   phiên bản chưa ký tự động.
 
-Bộ gõ Windows vẫn có duy nhất `TelexMini.exe`. Gói preview và SHA-256
-được tạo ở `dist/` bằng `package-preview.ps1`. Xem
-`PHASES-2-4-REPORT.md` tại repo để biết phần kiểm thử chưa đạt.
+Bộ gõ Windows vẫn có duy nhất `TelexMini.exe`. Icon ứng dụng là chữ T
+theo bộ nhận diện TelexMini; icon trên taskbar và khay hệ thống hiển thị
+chữ V/E lớn để biết chế độ hiện tại. Các cửa sổ từ điển, cài đặt, gõ tắt
+và ký tự nhanh dùng chung icon thương hiệu.
+
+Thu nhỏ bằng nút minimize chuẩn của Windows sẽ giữ cửa sổ trên taskbar.
+Nút **Thu xuống khay** mới ẩn cửa sổ; nhấp trái hoặc nhấp đúp icon TelexMini
+trong khay để mở lại. Chọn **Mở TelexMini** trong menu chuột phải, hoặc
+chạy shortcut lần nữa, cũng khôi phục cửa sổ đang chạy thay vì tạo instance mới.
+
+Chuyển V/E giữ bộ nhận diện ô nhập chạy nền trong chế độ English để
+không phải chờ UI Automation lại khi quay về tiếng Việt. Khi đổi ô nhập,
+mật khẩu vẫn fail-closed cho tới khi phân loại xong.
+
+Gói preview và SHA-256 được tạo ở `dist/` bằng `package-preview.ps1`.
+Xem `PHASES-2-4-REPORT.md` tại repo để biết phần kiểm thử chưa đạt.
 
 ## Kiểm thử Đợt 1 — Nền tảng ổn định
 

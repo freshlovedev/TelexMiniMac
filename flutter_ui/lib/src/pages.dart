@@ -126,10 +126,10 @@ class OverviewPage extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(child: Text(
                 controller.nativeConnected
-                  ? controller.t('Đã kết nối bộ máy gõ · Hoạt động offline',
-                    'Native engine connected · Offline')
-                  : controller.t('Chưa kết nối bộ máy gõ hệ thống',
-                    'Native input engine not connected'),
+                  ? controller.t('Giao diện điều khiển đã kết nối · Offline',
+                    'Settings bridge connected · Offline')
+                  : controller.t('Chưa kết nối giao diện điều khiển',
+                    'Settings bridge not connected'),
                 style: const TextStyle(color: muted, fontSize: 11),
               )),
               Text(controller.t('Không lưu lịch sử gõ', 'No typing history'),
@@ -484,11 +484,17 @@ class SettingsPage extends StatelessWidget {
         const SizedBox(height: 12),
         SurfaceCard(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const SectionTitle('PRIVACY'),
-          TextField(
-            controller: TextEditingController(text: controller.excludedApps),
-            onChanged: (v) => controller.excludedApps=v,
-            decoration: InputDecoration(labelText: controller.t('Ứng dụng bỏ qua','Excluded applications'), hintText: 'process.exe, terminal'),
-          ),
+          Row(children: [
+            const Icon(Icons.apps_rounded, color: teal),
+            const SizedBox(width: 9),
+            Expanded(child: Text(controller.t(
+              'Chọn process bỏ qua và cấu hình từng ứng dụng',
+              'Select excluded processes and per-app profiles'))),
+            TextButton.icon(
+              onPressed: () => controller.setPage(AppPage.applications),
+              icon: const Icon(Icons.arrow_forward_rounded),
+              label: Text(controller.t('Mở quản lý','Open manager'))),
+          ]),
           const SizedBox(height: 12),
           Align(alignment: Alignment.centerRight, child: PrimaryAction(label: controller.t('Lưu thay đổi','Save changes'), onPressed: controller.save)),
         ])),

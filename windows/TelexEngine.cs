@@ -21,6 +21,14 @@ namespace TelexMini
         string rawWord="", pendingEscapeRaw=null;
         public TelexEngine() { Reset(); }
         public void Reset() { Text = ""; literalWord = false; englishCandidate=false; foreignWord=false; telexShaped=false; lastTelexKey=false; lastToneApplied=false; pendingEscapeRaw=null; rawWord=""; }
+        // Used only after a verified one-step snippet undo. Keep the restored
+        // shortcut literal until the next word boundary.
+        internal void RestoreLiteralWord(string text) {
+            Reset();
+            Text=text ?? "";
+            rawWord=Text;
+            literalWord=true;
+        }
         public void Backspace() {
             if (Text.Length > 0) Text = Text.Substring(0, Text.Length - 1);
             rawWord=Text; // Never restore deleted characters after an edit.
@@ -133,6 +141,20 @@ namespace TelexMini
         // A doubled vowel is an explicit Telex shaping key, even if the
         // unaccented text is a prefix of an English word (boo -> bô).
         // Do not force the user to finish the syllable before showing its accent.
+        // w is a direct Telex shape command (standalone w -> ư, now -> nơ).
+        // A dictionary prefix such as "now" or "own" must not swallow this
+        // explicit command in Balanced/Vietnamese modes. English-first still
+        // wins for complete English words, and doubled w escapes Telex.
+        static bool ImmediateWShape(string composed,char key)
+        {
+            if(char.ToLowerInvariant(key)!='w')return false;
+            if(composed.Length==0)return true;
+            foreach(char c in composed) {
+                char b=Base(c);
+                if(b=='a'||b=='u'||b=='o'||b=='ă'||b=='ư'||b=='ơ')return true;
+            }
+            return false;
+        }
         static bool ImmediateShapeKey(string raw)
         {
             int n=raw.Length;
@@ -264,6 +286,28 @@ namespace TelexMini
             rawWord+=key;
             lastTelexKey=false;
             lastToneApplied=false;
+            // A recognized English token with doubled 'oo' and an impossible
+            // Vietnamese coda (boost/book) remains literal in Balanced mode.
+            // Do not protect soon/room/root: soong must still compose to sông.
+            if(SmartEnglish && !UseVni && rawWord.Length>=4 &&
+               rawWord.IndexOf("oo",StringComparison.Ordinal)>=0 &&
+               ImpossibleVietnamese(rawWord) && EnglishLexicon.IsWord(rawWord) &&
+               !EnglishLexicon.PreferVietnamesePrefix(rawWord)) {
+                Text=rawWord;literalWord=true;
+                englishCandidate=foreignWord=telexShaped=false;
+                return Text;
+            }
+            // An explicit English-first preference wins at the moment a full
+            // dictionary word is recognized, even if an earlier Telex prefix
+            // was tentatively composed (been -> bên while typing).
+            if(PreferEnglishExact && SmartEnglish && !UseVni &&
+               EnglishLexicon.IsKnownEnglishWord(rawWord)) {
+                Text=rawWord;
+                englishCandidate=true;
+                telexShaped=false;
+                foreignWord=false;
+                return Text;
+            }
             // A tone key between two vowels is not a Vietnamese tone at
             // the correct position: ex -> ẽ but exe -> exe (eex -> ễ).
             // Restore the raw token BEFORE another e can shape ẽ into ễ.
@@ -272,7 +316,8 @@ namespace TelexMini
                 telexShaped=false; pendingEscapeRaw=null;
                 return Text=rawWord;
             }
-            bool shapeNow=!UseVni && ImmediateShapeKey(rawWord);
+            bool shapeNow=!UseVni && !literalWord &&
+                (ImmediateShapeKey(rawWord) || ImmediateWShape(prior,key));
             PrefixAction action=ClassifyPrefix(shapeNow,toneNow);
             if (action==PrefixAction.PreserveForeign) {
                 foreignWord=true; englishCandidate=false;
@@ -299,6 +344,8 @@ namespace TelexMini
         // Conservative syllable check + optional offline English recognition.
         public string Finish(bool restoreInvalid)
         {
+            if (SmartEnglish && PreferEnglishExact && !UseVni &&
+                EnglishLexicon.IsKnownEnglishWord(rawWord)) return rawWord;
             if(pendingEscapeRaw!=null && SmartEnglish && EnglishLexicon.IsWord(pendingEscapeRaw))
                 return pendingEscapeRaw;
             if (SmartEnglish && !UseVni && !literalWord &&
@@ -417,6 +464,8 @@ namespace TelexMini
                     if (b == shaped) { a[i] = Shape(a[i], k); return Literal(Normalize(new string(a)) + key); }
                 }
             }
+            if (k == 'w' && Text.Length==0)
+                return Text=Case('ư',key).ToString();
             if (k == 'w' && vowels.Count > 0)
             {
                 // uo / uô / ưo -> ươ, including a trailing consonant.
