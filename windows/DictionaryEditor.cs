@@ -8,257 +8,175 @@ using System.Windows.Forms;
 
 namespace TelexMini
 {
-    // First-party local dictionary editor: no Notepad, browser or external UI.
-    // Files contain only words explicitly saved by the user, never typing history.
+    // First-party local dictionary editor. It stores explicit dictionary entries only.
     internal sealed class DictionaryEditor : Form
     {
         readonly string path;
         readonly bool vietnamese;
         readonly ListBox wordList;
-        readonly TextBox searchBox, wordBox;
-        readonly Label count, message;
-        readonly HashSet<string> words = new HashSet<string>(StringComparer.Ordinal);
+        readonly TextBox searchBox,wordBox;
+        readonly Label count,message;
+        readonly HashSet<string> words=new HashSet<string>(StringComparer.Ordinal);
         bool changed;
 
-        internal static Form CreateForTests(bool vietnamese, string testPath) {
+        internal static Form CreateForTests(bool vietnamese,string testPath) {
             return new DictionaryEditor(vietnamese,testPath);
         }
-
-        internal static bool Edit(IWin32Window owner, bool vietnamese)
-        {
-            using(var dialog=new DictionaryEditor(vietnamese))
-                return dialog.ShowDialog(owner)==DialogResult.OK;
+        internal static bool Edit(IWin32Window owner,bool vietnamese) {
+            using(var dialog=new DictionaryEditor(vietnamese))return dialog.ShowDialog(owner)==DialogResult.OK;
         }
-
-        DictionaryEditor(bool isVietnamese) : this(isVietnamese,null) { }
-
-        DictionaryEditor(bool isVietnamese,string testPath)
-        {
+        DictionaryEditor(bool isVietnamese):this(isVietnamese,null){}
+        DictionaryEditor(bool isVietnamese,string testPath) {
             vietnamese=isVietnamese;
-            path=testPath ?? (vietnamese ? EnglishLexicon.VietnamesePath : EnglishLexicon.EnglishPath);
-            Text=UiText.T(vietnamese ? "TelexMini · Ưu tiên tiếng Việt" : "TelexMini · Từ điển tiếng Anh");
-            Icon=AppIcons.Brand;
-            StartPosition=FormStartPosition.CenterParent;
-            ClientSize=new Size(600,570);
-            MinimumSize=new Size(560,500);
-            FormBorderStyle=FormBorderStyle.Sizable;
-            MaximizeBox=true;
-            ShowInTaskbar=false;
-            BackColor=Color.FromArgb(15,25,42);
-            ForeColor=Color.FromArgb(233,245,250);
-            Font=new Font("Segoe UI",10);
-            AutoScaleMode=AutoScaleMode.Dpi;
-            KeyPreview=true;
+            path=testPath??(vietnamese?EnglishLexicon.VietnamesePath:EnglishLexicon.EnglishPath);
+            Text=UiText.T(vietnamese?"TelexMini · Ưu tiên tiếng Việt":"TelexMini · Từ điển tiếng Anh");
+            Icon=AppIcons.Brand;StartPosition=FormStartPosition.CenterParent;
+            ClientSize=new Size(720,690);MinimumSize=new Size(620,560);
+            FormBorderStyle=FormBorderStyle.Sizable;MaximizeBox=true;ShowInTaskbar=false;
+            AutoScaleMode=AutoScaleMode.Dpi;Font=new Font("Segoe UI",9.5f);
+            BackColor=UiPalette.Page;ForeColor=UiPalette.Ink;KeyPreview=true;
 
-            var outer=new TableLayoutPanel {
-                Dock=DockStyle.Fill,Padding=new Padding(22),
-                BackColor=BackColor,ColumnCount=1,RowCount=5
-            };
-            outer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute,85));
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute,56));
-            outer.RowStyles.Add(new RowStyle(SizeType.Percent,100));
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute,57));
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute,61));
-            Controls.Add(outer);
+            var root=new TableLayoutPanel {Dock=DockStyle.Fill,Padding=new Padding(24,20,24,18),
+                ColumnCount=1,RowCount=5,BackColor=UiPalette.Page};
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute,76));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute,48));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute,62));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute,58));
+            Controls.Add(root);
 
-            var header=new Panel { Dock=DockStyle.Fill,BackColor=BackColor };
-            var title=new Label {
-                Text=UiText.T(isVietnamese ? "Ưu tiên Telex" : "Từ điển tiếng Anh"),
-                Dock=DockStyle.Top,Height=36,Font=new Font("Segoe UI",19,FontStyle.Bold),
-                ForeColor=ForeColor,AutoEllipsis=true
-            };
-            var subtitle=new Label {
-                Text=UiText.T(isVietnamese ?
-                    "Các chuỗi phím cần ưu tiên xử lý như tiếng Việt." :
-                    "Thêm, sửa, xóa từ. Bộ gõ sẽ nhận diện ngay sau khi lưu."),
-                Dock=DockStyle.Bottom,Height=30,
-                ForeColor=Color.FromArgb(154,174,191),AutoEllipsis=true
-            };
-            header.Controls.Add(title);header.Controls.Add(subtitle);
-            outer.Controls.Add(header,0,0);
+            var header=new Panel {Dock=DockStyle.Fill,BackColor=Color.Transparent};
+            var title=new Label {Text=UiText.T(vietnamese?"Ưu tiên Telex":"Từ điển tiếng Anh"),
+                Font=new Font("Segoe UI",20,FontStyle.Bold),ForeColor=UiPalette.Ink,
+                Location=new Point(0,0),AutoSize=true};
+            var subtitle=new Label {Text=UiText.T(vietnamese?
+                "Các chuỗi phím cần được xử lý ưu tiên như tiếng Việt.":
+                "Bảo vệ tên riêng, thuật ngữ và từ chuyên ngành khỏi bị chuyển đổi."),
+                Font=new Font("Segoe UI",9.2f),ForeColor=UiPalette.Muted,
+                Location=new Point(1,42),AutoSize=true};
+            header.Controls.Add(title);header.Controls.Add(subtitle);root.Controls.Add(header,0,0);
 
-            var findRow=new TableLayoutPanel {
-                Dock=DockStyle.Fill,ColumnCount=2,RowCount=1,Margin=Padding.Empty
-            };
+            var findRow=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=2,RowCount=1,
+                Margin=Padding.Empty,BackColor=Color.Transparent};
             findRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            findRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,145));
-            searchBox=new TextBox {
-                Dock=DockStyle.Top,Margin=new Padding(0,10,12,4),
-                Font=new Font("Segoe UI",11),Height=31,
-                BackColor=Color.FromArgb(29,42,60),ForeColor=Color.White,
-                BorderStyle=BorderStyle.FixedSingle
-            };
-            count=new Label {
-                Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleRight,
-                ForeColor=Color.FromArgb(137,166,186),
-                Font=new Font("Segoe UI",9),Margin=Padding.Empty
-            };
+            findRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,150));
+            searchBox=new TextBox {Dock=DockStyle.Fill,Margin=new Padding(0,5,14,5),
+                Font=new Font("Segoe UI",10)};
+            count=new Label {Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleRight,
+                Font=new Font("Segoe UI",8.8f),ForeColor=UiPalette.Muted,Margin=Padding.Empty};
             findRow.Controls.Add(searchBox,0,0);findRow.Controls.Add(count,1,0);
-            outer.Controls.Add(findRow,0,1);
+            root.Controls.Add(findRow,0,1);
 
-            wordList=new ListBox {
-                Dock=DockStyle.Fill,
-                IntegralHeight=false,HorizontalScrollbar=true,
-                BackColor=Color.FromArgb(25,38,56),ForeColor=Color.White,
-                Font=new Font("Consolas",11),
-                BorderStyle=BorderStyle.None,Margin=new Padding(0,0,0,11)
-            };
-            outer.Controls.Add(wordList,0,2);
+            var listCard=UiPalette.CreateCard(15);listCard.Dock=DockStyle.Fill;
+            listCard.Padding=new Padding(9);root.Controls.Add(listCard,0,2);
+            wordList=new ListBox {Dock=DockStyle.Fill,IntegralHeight=false,HorizontalScrollbar=true,
+                BackColor=UiPalette.Card,ForeColor=UiPalette.Ink,Font=new Font("Segoe UI",10),
+                BorderStyle=BorderStyle.None,Margin=Padding.Empty};
+            listCard.Controls.Add(wordList);
 
-            var editor=new TableLayoutPanel {
-                Dock=DockStyle.Fill,ColumnCount=3,RowCount=1,Margin=Padding.Empty
-            };
+            var editor=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=3,RowCount=1,
+                Margin=Padding.Empty,BackColor=Color.Transparent};
             editor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,100));
-            editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,100));
-            wordBox=new TextBox {
-                Dock=DockStyle.Top,Margin=new Padding(0,8,12,0),
-                Font=new Font("Segoe UI",11),Height=31,
-                BackColor=Color.FromArgb(29,42,60),ForeColor=Color.White,
-                BorderStyle=BorderStyle.FixedSingle
-            };
-            var add=ActionButton(UiText.T("Thêm / sửa"),Color.FromArgb(18,147,133));
-            var remove=ActionButton(UiText.T("Xóa từ"),Color.FromArgb(45,63,82));
-            editor.Controls.Add(wordBox,0,0);
-            editor.Controls.Add(add,1,0);
-            editor.Controls.Add(remove,2,0);
-            outer.Controls.Add(editor,0,3);
+            editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,118));
+            editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,112));
+            wordBox=new TextBox {Dock=DockStyle.Fill,Margin=new Padding(0,10,12,5),
+                Font=new Font("Segoe UI",10)};
+            var add=ActionButton(UiText.T("Thêm / sửa"),true);
+            var remove=ActionButton(UiText.T("Xóa từ"),false);
+            editor.Controls.Add(wordBox,0,0);editor.Controls.Add(add,1,0);editor.Controls.Add(remove,2,0);
+            root.Controls.Add(editor,0,3);
 
-            var footer=new TableLayoutPanel {
-                Dock=DockStyle.Fill,ColumnCount=3,RowCount=1,Margin=Padding.Empty
-            };
+            var footer=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=3,RowCount=1,
+                Margin=Padding.Empty,BackColor=Color.Transparent};
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,110));
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,110));
-            message=new Label {
-                Text=UiText.T("Chỉ hỗ trợ một từ a-z trên mỗi dòng."),
-                Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft,
-                ForeColor=Color.FromArgb(144,169,187),
-                Font=new Font("Segoe UI",8.6f),AutoEllipsis=true
-            };
-            var cancel=ActionButton(UiText.T("Hủy"),Color.FromArgb(45,63,82));
-            var save=ActionButton(UiText.T("Lưu"),Color.FromArgb(18,147,133));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,96));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,122));
+            message=new Label {Text=UiText.T("Mỗi dòng một từ gồm a-z. Không lưu lịch sử gõ."),
+                Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft,Font=new Font("Segoe UI",8.5f),
+                ForeColor=UiPalette.Muted,AutoEllipsis=true};
+            var cancel=ActionButton(UiText.T("Hủy"),false);
+            var save=ActionButton(UiText.T("Lưu thay đổi"),true);
             footer.Controls.Add(message,0,0);footer.Controls.Add(cancel,1,0);footer.Controls.Add(save,2,0);
-            outer.Controls.Add(footer,0,4);
+            root.Controls.Add(footer,0,4);
 
             LoadWords();
             searchBox.TextChanged+=delegate {RefreshList();};
             wordList.SelectedIndexChanged+=delegate {
-                if(wordList.SelectedItem!=null) wordBox.Text=wordList.SelectedItem.ToString();
+                if(wordList.SelectedItem!=null)wordBox.Text=wordList.SelectedItem.ToString();
             };
-            add.Click+=delegate {AddWord();};
-            remove.Click+=delegate {RemoveWord();};
-            save.Click+=delegate {SaveWords();};
-            cancel.Click+=delegate {Close();};
+            add.Click+=delegate {AddWord();};remove.Click+=delegate {RemoveWord();};
+            save.Click+=delegate {SaveWords();};cancel.Click+=delegate {Close();};
             wordBox.KeyDown+=delegate(object sender,KeyEventArgs e) {
-                if(e.KeyCode==Keys.Enter) {e.SuppressKeyPress=true;AddWord();}
+                if(e.KeyCode==Keys.Enter){e.SuppressKeyPress=true;AddWord();}
             };
             FormClosing+=delegate(object sender,FormClosingEventArgs e) {
-                if(!changed || DialogResult==DialogResult.OK) return;
+                if(!changed||DialogResult==DialogResult.OK)return;
                 var answer=MessageBox.Show(this,UiText.T("Bạn có thay đổi chưa lưu. Đóng mà không lưu?"),
                     UiText.T("TelexMini — Smart Bilingual Typing"),MessageBoxButtons.YesNo,MessageBoxIcon.Question);
-                if(answer==DialogResult.No) e.Cancel=true;
+                if(answer==DialogResult.No)e.Cancel=true;
             };
             UiPalette.Apply(this);
+            listCard.StartColor=listCard.EndColor=UiPalette.Card;listCard.Outline=UiPalette.Border;
+            wordList.BackColor=UiPalette.Card;wordList.ForeColor=UiPalette.Ink;
+            UiPalette.StyleTextBox(searchBox);UiPalette.StyleTextBox(wordBox);
+            UiPalette.StyleButton(add,true);UiPalette.StyleButton(remove);UiPalette.StyleButton(cancel);
+            UiPalette.StyleButton(save,true);
         }
 
-        static Button ActionButton(string text,Color back)
-        {
-            var button=new Button {
-                Dock=DockStyle.Fill,Text=text,Margin=new Padding(5,6,0,5),
-                BackColor=back,ForeColor=Color.White,
-                FlatStyle=FlatStyle.Flat,Cursor=Cursors.Hand,
-                Font=new Font("Segoe UI",9.2f,FontStyle.Bold)
-            };
-            button.FlatAppearance.BorderSize=0;
-            return button;
+        static Button ActionButton(string text,bool primary) {
+            var button=new Button {Dock=DockStyle.Fill,Text=text,Margin=new Padding(5,6,0,5)};
+            UiPalette.StyleButton(button,primary);return button;
         }
-
-        static bool IsWord(string word)
-        {
-            if(word.Length==0 || word.Length>64) return false;
-            foreach(char c in word) if(c<'a' || c>'z') return false;
+        static bool IsWord(string word) {
+            if(word.Length==0||word.Length>64)return false;
+            foreach(char c in word)if(c<'a'||c>'z')return false;
             return true;
         }
-
-        void LoadWords()
-        {
+        void LoadWords() {
             try {
-                // Portable legacy file may exist even when user dictionary has moved
-                // to LocalAppData. Preserve these entries on the next save.
                 string legacy=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
-                    vietnamese ? "VietnameseOverrides.txt" : "EnglishWords.txt");
-                // Once AppData exists it is authoritative; reading the
-                // legacy file again would resurrect words deleted in the UI.
-                foreach(string file in new[] {File.Exists(path) ? path : legacy}) {
-                    if(!File.Exists(file)) continue;
+                    vietnamese?"VietnameseOverrides.txt":"EnglishWords.txt");
+                foreach(string file in new[]{File.Exists(path)?path:legacy}) {
+                    if(!File.Exists(file))continue;
                     foreach(string line in File.ReadAllLines(file,Encoding.UTF8)) {
-                        string word=line.Trim().ToLowerInvariant();
-                        if(IsWord(word)) words.Add(word);
+                        string word=line.Trim().ToLowerInvariant();if(IsWord(word))words.Add(word);
                     }
                 }
                 RefreshList();
-            }
-            catch(Exception ex) {
-                message.Text=UiText.T("Không đọc được từ điển: ")+ex.Message;
-            }
+            } catch(Exception ex) {message.Text=UiText.T("Không đọc được từ điển: ")+ex.Message;}
         }
-
-        void RefreshList()
-        {
+        void RefreshList() {
             string filter=searchBox.Text.Trim().ToLowerInvariant();
             string selected=wordList.SelectedItem as string;
-            wordList.BeginUpdate();
-            wordList.Items.Clear();
-            foreach(string word in words.OrderBy(s=>s,StringComparer.Ordinal)) {
-                if(word.Contains(filter)) wordList.Items.Add(word);
-            }
-            if(selected!=null && wordList.Items.Contains(selected))
-                wordList.SelectedItem=selected;
-            wordList.EndUpdate();
-            count.Text=wordList.Items.Count+" / "+words.Count+" "+UiText.T("Từ");
+            wordList.BeginUpdate();wordList.Items.Clear();
+            foreach(string word in words.OrderBy(s=>s,StringComparer.Ordinal))
+                if(word.Contains(filter))wordList.Items.Add(word);
+            if(selected!=null&&wordList.Items.Contains(selected))wordList.SelectedItem=selected;
+            wordList.EndUpdate();count.Text=wordList.Items.Count+" / "+words.Count+" "+UiText.T("Từ");
         }
-
-        void AddWord()
-        {
+        void AddWord() {
             string word=wordBox.Text.Trim().ToLowerInvariant();
-            if(!IsWord(word)) {
-                message.Text=UiText.T("Từ phải dài 1–64 ký tự, chỉ gồm a-z.");
-                return;
-            }
+            if(!IsWord(word)){message.Text=UiText.T("Từ phải dài 1–64 ký tự, chỉ gồm a-z.");return;}
             string selected=wordList.SelectedItem as string;
-            if(selected!=null && selected!=word && words.Contains(selected)) words.Remove(selected);
-            if(words.Add(word) || (selected!=null && selected!=word)) changed=true;
-            searchBox.Clear();
-            RefreshList();
-            wordList.SelectedItem=word;
+            if(selected!=null&&selected!=word&&words.Contains(selected))words.Remove(selected);
+            if(words.Add(word)||(selected!=null&&selected!=word))changed=true;
+            searchBox.Clear();RefreshList();wordList.SelectedItem=word;
             message.Text=UiText.T("Đã thay đổi. Bấm Lưu để áp dụng.");
         }
-
-        void RemoveWord()
-        {
-            string selected=wordList.SelectedItem as string;
-            if(selected==null) return;
-            if(words.Remove(selected)) changed=true;
-            wordBox.Clear();
-            RefreshList();
-            message.Text=UiText.T("Đã xóa khỏi danh sách. Bấm Lưu để áp dụng.");
+        void RemoveWord() {
+            string selected=wordList.SelectedItem as string;if(selected==null)return;
+            if(words.Remove(selected))changed=true;
+            wordBox.Clear();RefreshList();message.Text=UiText.T("Đã xóa khỏi danh sách. Bấm Lưu để áp dụng.");
         }
-
-        void SaveWords()
-        {
+        void SaveWords() {
             try {
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 string tmp=path+".tmp";
-                File.WriteAllLines(tmp,words.OrderBy(s=>s,StringComparer.Ordinal).ToArray(),
-                                   new UTF8Encoding(false));
-                if(File.Exists(path)) File.Replace(tmp,path,null);
-                else File.Move(tmp,path);
-                DialogResult=DialogResult.OK;
-                Close();
-            }
-            catch(Exception ex) {
+                File.WriteAllLines(tmp,words.OrderBy(s=>s,StringComparer.Ordinal).ToArray(),new UTF8Encoding(false));
+                if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);
+                DialogResult=DialogResult.OK;Close();
+            } catch(Exception ex) {
                 MessageBox.Show(this,UiText.T("Không lưu được từ điển:\n")+ex.Message,
                     UiText.T("TelexMini — Smart Bilingual Typing"),MessageBoxButtons.OK,MessageBoxIcon.Error);
             }

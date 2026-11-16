@@ -26,22 +26,23 @@ try {
             [System.Drawing.Point]::new(0,0),[System.Drawing.Point]::new(1024,1024),$start,$end)
         try {$g.FillPath($brush,$rounded)} finally {$brush.Dispose()}
     } finally {$rounded.Dispose()}
-    $pen=[System.Drawing.Pen]::new([System.Drawing.Color]::White,108)
+    # White feather with a turquoise central quill.
+    $path=[System.Drawing.Drawing2D.GraphicsPath]::new()
+    try {
+        $path.StartFigure()
+        $path.AddBezier(234,761,202,584,329,369,600,232)
+        $path.AddBezier(600,232,695,184,779,165,822,156)
+        $path.AddBezier(822,156,801,247,755,377,656,502)
+        $path.AddBezier(656,502,532,658,360,688,234,761)
+        $path.CloseFigure()
+        $white=[System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255,251,255,253))
+        try{$g.FillPath($white,$path)}finally{$white.Dispose()}
+    } finally {$path.Dispose()}
+    $pen=[System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(255,7,91,112),25)
     try {
         $pen.StartCap=[System.Drawing.Drawing2D.LineCap]::Round
         $pen.EndCap=[System.Drawing.Drawing2D.LineCap]::Round
-        $pen.LineJoin=[System.Drawing.Drawing2D.LineJoin]::Round
-        # Two arrow heads and opposed strokes; the mark is not a letter.
-        $g.DrawLine($pen,246,358,737,358)
-        $g.DrawLines($pen,[System.Drawing.Point[]]@(
-            [System.Drawing.Point]::new(594,225),
-            [System.Drawing.Point]::new(747,358),
-            [System.Drawing.Point]::new(594,491)))
-        $g.DrawLine($pen,778,666,287,666)
-        $g.DrawLines($pen,[System.Drawing.Point[]]@(
-            [System.Drawing.Point]::new(430,533),
-            [System.Drawing.Point]::new(277,666),
-            [System.Drawing.Point]::new(430,799)))
+        $g.DrawLine($pen,207,820,717,280)
     } finally {$pen.Dispose()}
     $parent=Split-Path -Parent $OutputPath
     if(-not(Test-Path $parent)){New-Item -ItemType Directory -Force $parent|Out-Null}

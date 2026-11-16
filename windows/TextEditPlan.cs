@@ -17,6 +17,9 @@ namespace TelexMini
             int common=0;
             while(common<before.Length && common<after.Length &&
                   before[common]==after[common]) common++;
+            // Two emoji can share the same UTF-16 high surrogate. Never leave
+            // half a surrogate pair in the target text control.
+            if(common>0 && char.IsHighSurrogate(before[common-1]))common--;
             return new TextEditPlan(before.Length-common,after.Substring(common));
         }
         // Simulates insertion into a scratch text field with the caret at the

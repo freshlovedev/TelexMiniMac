@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Runtime.InteropServices;
 
 namespace TelexMini
@@ -52,6 +53,23 @@ namespace TelexMini
         [return: MarshalAs(UnmanagedType.I1)]
         static extern bool NativeReload(IntPtr handle);
 
+        // Bind the composer to a writable dictionary path from first launch.
+        // Otherwise edits created later by Flutter would reload a stale
+        // packaged dictionary while the new file lives in LocalAppData.
+        internal static string EnsureWritableDictionary(string userPath,string legacyPath) {
+            string folder=Path.GetDirectoryName(userPath);
+            if(!string.IsNullOrEmpty(folder))Directory.CreateDirectory(folder);
+            if(!File.Exists(userPath)) {
+                try {
+                    if(File.Exists(legacyPath))File.Copy(legacyPath,userPath,false);
+                    else File.WriteAllText(userPath,"",new UTF8Encoding(false));
+                } catch(IOException) {
+                    if(!File.Exists(userPath))throw;
+                }
+            }
+            return userPath;
+        }
+
         IntPtr handle;
         string textCache="";
         bool smartEnglish=true,englishFirst, vni, restoreInvalid=true;
@@ -61,10 +79,10 @@ namespace TelexMini
             string seed=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"english_seed.txt");
             if(!File.Exists(seed))
                 throw new FileNotFoundException("Native engine dictionary is missing.",seed);
-            string english=File.Exists(EnglishLexicon.EnglishPath)?EnglishLexicon.EnglishPath:
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"EnglishWords.txt");
-            string vietnamese=File.Exists(EnglishLexicon.VietnamesePath)?EnglishLexicon.VietnamesePath:
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"VietnameseOverrides.txt");
+            string english=EnsureWritableDictionary(EnglishLexicon.EnglishPath,
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"EnglishWords.txt"));
+            string vietnamese=EnsureWritableDictionary(EnglishLexicon.VietnamesePath,
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"VietnameseOverrides.txt"));
             handle=Create(seed,english,vietnamese);
             if(handle==IntPtr.Zero)throw new InvalidOperationException("Cannot initialize native composer.");
             if(!Configure(handle,smartEnglish,englishFirst,vni,restoreInvalid))

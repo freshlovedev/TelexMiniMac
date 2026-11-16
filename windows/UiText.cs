@@ -102,12 +102,92 @@ namespace TelexMini
             {"Profile phải có tên ứng dụng, Tab, chế độ.","Each profile needs an app name, Tab, and mode."},
             {"Profile chỉ nhận English/Vietnamese/Balanced.","Profile mode must be English, Vietnamese or Balanced."},
             {"Tên ứng dụng không hợp lệ.","Invalid application name."},{"Tối đa 200 ứng dụng.","A maximum of 200 app profiles is allowed."},
+            {"Tùy chỉnh cách nhập, ngôn ngữ và hành vi của TelexMini.","Customize input, language and TelexMini behavior."},
+            {"PHƯƠNG THỨC NHẬP","INPUT METHOD"},{"Kiểu gõ và quy tắc phân giải chuỗi Anh–Việt.","Typing method and English–Vietnamese resolution rules."},
+            {"Kiểu gõ","Typing method"},{"Chọn Telex hoặc VNI","Choose Telex or VNI"},
+            {"Ưu tiên ngôn ngữ","Language priority"},{"Xử lý từ mơ hồ","Resolve ambiguous words"},
+            {"Phím chuyển V/E","V/E shortcut"},{"Chuyển chế độ nhập","Switch input mode"},
+            {"Ngôn ngữ giao diện","Interface language"},{"Áp dụng toàn bộ cửa sổ","Applies to all windows"},
+            {"HỆ THỐNG","SYSTEM"},{"Tùy chọn khởi động và vị trí lưu dữ liệu.","Startup and data storage options."},
+            {"Mở TelexMini khi đăng nhập","Open TelexMini when you sign in"},
+            {"Portable Mode","Portable Mode"},{"Lưu dữ liệu cạnh EXE · cần khởi động lại","Store data beside EXE · restart required"},
+            {"ỨNG DỤNG BỎ QUA","EXCLUDED APPLICATIONS"},{"Nhập tên tiến trình, phân tách bằng dấu phẩy.","Enter process names, separated by commas."},
+            {"Cấu hình và từ điển lưu trên máy. Không ghi lịch sử gõ.","Settings and dictionaries stay on this device. No typing history."},
+            {"Lưu thay đổi","Save changes"},{"Bảo vệ tên riêng, thuật ngữ và từ chuyên ngành khỏi bị chuyển đổi.","Protect names and technical terms from being converted."},
+            {"Tìm từ trong từ điển...","Search dictionary..."},{"Mỗi dòng một từ gồm a-z. Không lưu lịch sử gõ.","One a-z word per line. Typing history is never stored."},
+            {"Ctrl + Shift + Space để chuyển V/E","Ctrl + Shift + Space to switch V/E"},
         };
         internal static bool IsEnglish {get {return UserPreferences.String("UILanguage","vi")=="en";}}
         internal static string T(string value) {
             if(!IsEnglish || value==null)return value;
             string translated;
             return English.TryGetValue(value,out translated)?translated:value;
+        }
+    }
+
+    internal sealed class ModernSwitch : Control
+    {
+        bool checkedValue;
+        internal event EventHandler CheckedChanged;
+        internal bool Checked {
+            get {return checkedValue;}
+            set {if(checkedValue==value)return;checkedValue=value;Invalidate();
+                var handler=CheckedChanged;if(handler!=null)handler(this,EventArgs.Empty);}
+        }
+        internal ModernSwitch() {
+            Height=30;Cursor=Cursors.Hand;TabStop=true;
+            AccessibleRole=AccessibleRole.CheckButton;
+            SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|
+                ControlStyles.OptimizedDoubleBuffer|ControlStyles.ResizeRedraw|
+                ControlStyles.SupportsTransparentBackColor,true);
+            BackColor=Color.Transparent;
+        }
+        protected override void OnClick(EventArgs e) {
+            base.OnClick(e);Checked=!Checked;
+        }
+        protected override void OnKeyDown(KeyEventArgs e) {
+            if(e.KeyCode==Keys.Space){Checked=!Checked;e.Handled=true;e.SuppressKeyPress=true;return;}
+            base.OnKeyDown(e);
+        }
+        protected override void OnPaint(PaintEventArgs e) {
+            var g=e.Graphics;g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(UiPalette.Card);
+            float trackW=40,trackH=22;
+            float x=Width-trackW-2,y=(Height-trackH)/2f;
+            var textRect=new RectangleF(0,0,Math.Max(0,x-14),Height);
+            using(var brush=new SolidBrush(Enabled?UiPalette.Ink:UiPalette.Muted))
+            using(var font=new Font("Segoe UI",9.5f,FontStyle.Regular))
+                g.DrawString(Text,font,brush,textRect,new StringFormat{Alignment=StringAlignment.Near,
+                    LineAlignment=StringAlignment.Center,Trimming=StringTrimming.EllipsisCharacter});
+            var track=new RectangleF(x,y,trackW,trackH);
+            using(var path=RoundedPanel.Rounded(Rectangle.Round(track),11))
+            using(var fill=new SolidBrush(Checked?UiPalette.Accent:Color.FromArgb(185,201,211)))
+                g.FillPath(fill,path);
+            float knob=16,knobX=Checked?x+trackW-knob-3:x+3;
+            using(var fill=new SolidBrush(Color.White))g.FillEllipse(fill,knobX,y+3,knob,knob);
+            if(Focused)using(var pen=new Pen(UiPalette.Accent,1.4f))
+                g.DrawRectangle(pen,1,1,Math.Max(1,Width-3),Math.Max(1,Height-3));
+        }
+    }
+
+    internal sealed class ModernComboBox : ComboBox
+    {
+        internal ModernComboBox() {
+            DrawMode=DrawMode.OwnerDrawFixed;DropDownStyle=ComboBoxStyle.DropDownList;
+            FlatStyle=FlatStyle.Flat;ItemHeight=30;Height=36;
+            Font=new Font("Segoe UI",9.5f);
+            BackColor=UiPalette.Field;ForeColor=UiPalette.Ink;
+        }
+        protected override void OnDrawItem(DrawItemEventArgs e) {
+            bool selected=(e.State&DrawItemState.Selected)==DrawItemState.Selected;
+            using(var background=new SolidBrush(selected?Color.FromArgb(221,247,243):UiPalette.Field))
+                e.Graphics.FillRectangle(background,e.Bounds);
+            if(e.Index>=0) {
+                using(var brush=new SolidBrush(selected?UiPalette.Accent:UiPalette.Ink))
+                    e.Graphics.DrawString(GetItemText(Items[e.Index]),Font,brush,
+                        new RectangleF(e.Bounds.X+9,e.Bounds.Y,e.Bounds.Width-16,e.Bounds.Height),
+                        new StringFormat{LineAlignment=StringAlignment.Center,Trimming=StringTrimming.EllipsisCharacter});
+            }
         }
     }
 
@@ -123,15 +203,29 @@ namespace TelexMini
         internal static Color Border {get{return Dark?Color.FromArgb(48,68,88):Color.FromArgb(222,231,239);}}
         internal static Color Sidebar {get{return Color.FromArgb(13,31,48);}}
 
+        internal static RoundedPanel CreateCard(int radius=16) {
+            return new RoundedPanel {CornerRadius=radius,StartColor=Card,EndColor=Card,
+                Outline=Border,BackColor=Card};
+        }
+        internal static void StyleTextBox(TextBox box) {
+            box.BackColor=Field;box.ForeColor=Ink;box.BorderStyle=BorderStyle.FixedSingle;
+            box.Font=new Font("Segoe UI",10);
+        }
+        internal static void StyleButton(Button button,bool primary=false) {
+            button.FlatStyle=FlatStyle.Flat;button.FlatAppearance.BorderSize=primary?0:1;
+            button.FlatAppearance.BorderColor=Border;
+            button.FlatAppearance.MouseOverBackColor=primary?Color.FromArgb(0,125,120):Field;
+            button.BackColor=primary?Accent:Card;button.ForeColor=primary?Color.White:Ink;
+            button.Font=new Font("Segoe UI Semibold",9.2f,FontStyle.Bold);
+            button.Cursor=Cursors.Hand;
+        }
         internal static void Apply(Form form)
         {
-            form.Icon=AppIcons.Brand;
-            form.Font=new Font("Segoe UI",9.5f);
-            form.BackColor=Page;form.ForeColor=Ink;
-            form.AutoScaleMode=AutoScaleMode.Dpi;
-            foreach(Control child in form.Controls) ApplyChild(child,false);
+            form.Icon=AppIcons.Brand;form.Font=new Font("Segoe UI",9.5f);
+            form.BackColor=Page;form.ForeColor=Ink;form.AutoScaleMode=AutoScaleMode.Dpi;
+            foreach(Control child in form.Controls) ApplyChild(child);
         }
-        static void ApplyChild(Control child,bool nested)
+        static void ApplyChild(Control child)
         {
             var label=child as Label;
             if(label!=null) {
@@ -142,28 +236,16 @@ namespace TelexMini
                 label.ForeColor=accent?Accent:(heading?Ink:(label.Font.Size<9.2f?Muted:Ink));
                 label.BackColor=Color.Transparent;
             }
-            var text=child as TextBox;
-            if(text!=null){text.BackColor=Field;text.ForeColor=Ink;text.BorderStyle=BorderStyle.FixedSingle;}
-            var list=child as ListBox;
-            if(list!=null){list.BackColor=Field;list.ForeColor=Ink;border(list);}
-            var combo=child as ComboBox;
-            if(combo!=null){combo.BackColor=Field;combo.ForeColor=Ink;combo.FlatStyle=FlatStyle.Flat;}
-            var check=child as CheckBox;
-            if(check!=null){check.BackColor=Color.Transparent;check.ForeColor=Ink;}
-            var button=child as Button;
-            if(button!=null){
-                button.BackColor=Card;button.ForeColor=Ink;button.FlatStyle=FlatStyle.Flat;
-                button.FlatAppearance.BorderColor=Border;button.FlatAppearance.BorderSize=1;
-                button.FlatAppearance.MouseOverBackColor=Field;
-                button.Font=new Font("Segoe UI Semibold",9.2f,FontStyle.Bold);
-                button.Cursor=Cursors.Hand;
-            }
+            var text=child as TextBox;if(text!=null) StyleTextBox(text);
+            var list=child as ListBox;if(list!=null){list.BackColor=Field;list.ForeColor=Ink;}
+            var combo=child as ComboBox;if(combo!=null){combo.BackColor=Field;combo.ForeColor=Ink;combo.FlatStyle=FlatStyle.Flat;}
+            var check=child as CheckBox;if(check!=null){check.BackColor=Color.Transparent;check.ForeColor=Ink;}
+            var button=child as Button;if(button!=null) StyleButton(button);
             var panel=child as Panel;
             if(panel!=null) {
                 if(panel is TableLayoutPanel || panel is FlowLayoutPanel) panel.BackColor=Page;
-                foreach(Control nestedChild in panel.Controls) ApplyChild(nestedChild,true);
+                foreach(Control nested in panel.Controls) ApplyChild(nested);
             }
         }
-        static void border(ListBox list) { }
     }
 }

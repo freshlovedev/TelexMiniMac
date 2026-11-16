@@ -5,7 +5,19 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-enum AppPage { overview, englishDictionary, vietnamesePriority, snippets, symbols, applications, textTools, typingLab, diagnostics, settings }
+enum AppPage {
+  overview,
+  englishDictionary,
+  vietnamesePriority,
+  snippets,
+  symbols,
+  applications,
+  textTools,
+  typingLab,
+  diagnostics,
+  settings,
+  about,
+}
 
 class AppController extends ChangeNotifier {
   AppController({this.settingsDirectoryOverride});
@@ -21,17 +33,25 @@ class AppController extends ChangeNotifier {
   Future<void> checkNavigation() async {
     if (!Platform.isWindows) return;
     try {
-      final root = Platform.environment['APPDATA'] ?? Platform.environment['LOCALAPPDATA'];
+      final root =
+          Platform.environment['APPDATA'] ??
+          Platform.environment['LOCALAPPDATA'];
       if (root == null) return;
       final file = File('$root/TelexMini/FlutterUI/navigation.txt');
       if (!await file.exists()) return;
       final name = (await file.readAsString()).trim();
       await file.delete();
       for (final candidate in AppPage.values) {
-        if (candidate.name == name) { await setPage(candidate); break; }
+        if (candidate.name == name) {
+          await setPage(candidate);
+          break;
+        }
       }
-    } catch (_) { /* Do not interrupt the input engine on a navigation failure. */ }
+    } catch (_) {
+      /* Do not interrupt the input engine on a navigation failure. */
+    }
   }
+
   bool _refreshingMode = false;
   bool _changingMode = false;
 
@@ -63,9 +83,80 @@ class AppController extends ChangeNotifier {
   String profilesText = '';
   final List<String> englishWords = [];
   final List<String> vietnameseWords = [];
-  final List<String> symbols = ['→','←','↑','↓','↔','✓','✕','★','☆','♥','©','®','™','°','±','∞','≠','≤','≥','…','—','·','€','£'];
+  final List<String> symbols = [
+    '→',
+    '←',
+    '↑',
+    '↓',
+    '↔',
+    '✓',
+    '✕',
+    '★',
+    '☆',
+    '♥',
+    '©',
+    '®',
+    '™',
+    '°',
+    '±',
+    '∞',
+    '≠',
+    '≤',
+    '≥',
+    '…',
+    '—',
+    '·',
+    '€',
+    '£',
+  ];
 
   String t(String vi, String en) => englishUI ? en : vi;
+
+  static const languagePriorities = <String>[
+    'Balanced',
+    'Vietnamese',
+    'English',
+  ];
+
+  Future<void> setLanguagePriority(String value) async {
+    if (!languagePriorities.contains(value)) {
+      throw const FormatException('Unsupported language priority');
+    }
+    if (languagePriority == value) return;
+    final previous = languagePriority;
+    languagePriority = value;
+    notifyListeners();
+    try {
+      await save(requireNative: true);
+    } catch (_) {
+      languagePriority = previous;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Snippets are stored in native snippets.tsv, not overwritten on every
+  /// settings change. Commit in-memory state only after a successful save.
+  Future<void> updateSnippets(String updated) async {
+    if (updated.length > 65536) {
+      throw const FormatException('Snippets exceed storage limits');
+    }
+    try {
+      await _channel.invokeMethod<void>('saveSnippets', {'text': updated});
+      nativeConnected = true;
+    } on MissingPluginException {
+      nativeConnected = false;
+      if (Platform.isWindows && settingsDirectoryOverride == null) rethrow;
+    } on PlatformException {
+      nativeConnected = false;
+      rethrow;
+    }
+    final firstSnippet = snippetText.isEmpty && updated.isNotEmpty;
+    snippetText = updated;
+    if (firstSnippet && !snippetsEnabled) snippetsEnabled = true;
+    notifyListeners();
+    await save();
+  }
 
   Future<void> load() async {
     final data = await _LocalSettings.read(settingsDirectoryOverride);
@@ -93,22 +184,59 @@ class AppController extends ChangeNotifier {
     profilesText = data['profilesText'] as String? ?? '';
     englishWords
       ..clear()
-      ..addAll((data['englishWords'] as List<dynamic>? ?? englishWords).cast<String>());
+      ..addAll(
+        (data['englishWords'] as List<dynamic>? ?? englishWords).cast<String>(),
+      );
     vietnameseWords
       ..clear()
-      ..addAll((data['vietnameseWords'] as List<dynamic>? ?? vietnameseWords).cast<String>());
+      ..addAll(
+        (data['vietnameseWords'] as List<dynamic>? ?? vietnameseWords)
+            .cast<String>(),
+      );
     try {
-      final status = await _channel.invokeMapMethod<String, dynamic>('getStatus');
+      final status = await _channel.invokeMapMethod<String, dynamic>(
+        'getStatus',
+      );
       if (status != null) {
         nativeConnected = true;
-        vietnameseEnabled = status['vietnameseEnabled'] as bool? ?? vietnameseEnabled;
+        vietnameseEnabled =
+            status['vietnameseEnabled'] as bool? ?? vietnameseEnabled;
         automaticMode = status['automaticMode'] as bool? ?? automaticMode;
+        final priority = status['languagePriority'] as String?;
+        if (priority != null && languagePriorities.contains(priority)) {
+          languagePriority = priority;
+        }
       }
-      final english = await _channel.invokeListMethod<String>('loadDictionary', {'vietnamese': false});
-      final vietnamese = await _channel.invokeListMethod<String>('loadDictionary', {'vietnamese': true});
-      if (english != null) englishWords..clear()..addAll(english);
-      if (vietnamese != null) vietnameseWords..clear()..addAll(vietnamese);
-      profilesText = await _channel.invokeMethod<String>('loadProfiles') ?? profilesText;
+      final english = await _channel.invokeListMethod<String>(
+        'loadDictionary',
+        {'vietnamese': false},
+      );
+      final vietnamese = await _channel.invokeListMethod<String>(
+        'loadDictionary',
+        {'vietnamese': true},
+      );
+      if (english != null) {
+        englishWords
+          ..clear()
+          ..addAll(english);
+      }
+      if (vietnamese != null) {
+        vietnameseWords
+          ..clear()
+          ..addAll(vietnamese);
+      }
+      profilesText =
+          await _channel.invokeMethod<String>('loadProfiles') ?? profilesText;
+      final nativeSnippets = await _channel.invokeMethod<String>(
+        'loadSnippets',
+      );
+      if (nativeSnippets != null) {
+        snippetText = nativeSnippets;
+      } else if (snippetText.isNotEmpty) {
+        await _channel.invokeMethod<void>('saveSnippets', {
+          'text': snippetText,
+        });
+      }
     } on MissingPluginException {
       nativeConnected = false;
     } on PlatformException {
@@ -123,9 +251,13 @@ class AppController extends ChangeNotifier {
   void startNativeMonitoring() {
     if (_disposed) return;
     _navigationMonitor ??= Timer.periodic(
-      const Duration(seconds: 5), (_) => unawaited(checkNavigation()));
+      const Duration(seconds: 5),
+      (_) => unawaited(checkNavigation()),
+    );
     _modeMonitor ??= Timer.periodic(
-      const Duration(seconds: 5), (_) => unawaited(refreshNativeMode()));
+      const Duration(seconds: 5),
+      (_) => unawaited(refreshNativeMode()),
+    );
     unawaited(checkNavigation());
     if (!_watching && Platform.isWindows) {
       _watching = true;
@@ -134,30 +266,45 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _startFileWatchers() async {
-    final local = settingsDirectoryOverride ??
+    final local =
+        settingsDirectoryOverride ??
         '${Platform.environment['LOCALAPPDATA'] ?? Directory.current.path}/TelexMini';
     final roaming = Platform.environment['APPDATA'];
     try {
       final prefs = Directory(local);
       await prefs.create(recursive: true);
       if (_disposed) return;
-      _preferenceEvents = prefs.watch().listen((event) {
-        if (!event.path.toLowerCase().contains('preferences.ini')) return;
-        _statusDebounce?.cancel();
-        _statusDebounce = Timer(const Duration(milliseconds: 40),
-            () => unawaited(refreshNativeMode()));
-      }, onError: (_) { /* The five-second safety poll remains active. */ });
+      _preferenceEvents = prefs.watch().listen(
+        (event) {
+          if (!event.path.toLowerCase().contains('preferences.ini')) return;
+          _statusDebounce?.cancel();
+          _statusDebounce = Timer(
+            const Duration(milliseconds: 40),
+            () => unawaited(refreshNativeMode()),
+          );
+        },
+        onError: (_) {
+          /* The five-second safety poll remains active. */
+        },
+      );
       if (settingsDirectoryOverride == null && roaming != null) {
         final navigation = Directory('$roaming/TelexMini/FlutterUI');
         await navigation.create(recursive: true);
         if (_disposed) return;
-        _navigationEvents = navigation.watch().listen((event) {
-          if (event.path.toLowerCase().endsWith('navigation.txt')) {
-            // File creation can be signalled before the writer has closed it.
-            unawaited(Future<void>.delayed(const Duration(milliseconds: 45))
-                .then((_) => checkNavigation()));
-          }
-        }, onError: (_) { /* The navigation safety poll remains active. */ });
+        _navigationEvents = navigation.watch().listen(
+          (event) {
+            if (event.path.toLowerCase().endsWith('navigation.txt')) {
+              // File creation can be signalled before the writer has closed it.
+              unawaited(
+                Future<void>.delayed(const Duration(milliseconds: 45))
+                    .then((_) => checkNavigation()),
+              );
+            }
+          },
+          onError: (_) {
+            /* The navigation safety poll remains active. */
+          },
+        );
       }
     } on FileSystemException {
       // Network profiles and locked directories still work via fallback polls.
@@ -168,15 +315,27 @@ class AppController extends ChangeNotifier {
     if (_refreshingMode || _changingMode) return;
     _refreshingMode = true;
     try {
-      final status = await _channel.invokeMapMethod<String, dynamic>('getStatus');
+      final status = await _channel.invokeMapMethod<String, dynamic>(
+        'getStatus',
+      );
       if (status == null) return;
       final mode = status['vietnameseEnabled'] as bool? ?? vietnameseEnabled;
       final automatic = status['automaticMode'] as bool? ?? automaticMode;
-      final changed = !nativeConnected ||
-          vietnameseEnabled != mode || automaticMode != automatic;
+      final externalPriority = status['languagePriority'] as String?;
+      final nextPriority =
+          externalPriority != null &&
+              languagePriorities.contains(externalPriority)
+          ? externalPriority
+          : languagePriority;
+      final changed =
+          !nativeConnected ||
+          vietnameseEnabled != mode ||
+          automaticMode != automatic ||
+          languagePriority != nextPriority;
       nativeConnected = true;
       vietnameseEnabled = mode;
       automaticMode = automatic;
+      languagePriority = nextPriority;
       if (changed) notifyListeners();
     } on MissingPluginException {
       if (nativeConnected) {
@@ -232,15 +391,21 @@ class AppController extends ChangeNotifier {
     'vietnameseWords': vietnameseWords,
   };
 
-  Future<void> save() async {
+  Future<void> save({bool requireNative = false}) async {
     final settings = _toJson();
     try {
       await _channel.invokeMethod<void>('applyPreferences', settings);
       nativeConnected = true;
     } on MissingPluginException {
       nativeConnected = false;
+      if (requireNative &&
+          Platform.isWindows &&
+          settingsDirectoryOverride == null) {
+        rethrow;
+      }
     } on PlatformException {
       nativeConnected = false;
+      if (requireNative) rethrow;
     }
     await _LocalSettings.write(settings, settingsDirectoryOverride);
     notifyListeners();
@@ -249,19 +414,28 @@ class AppController extends ChangeNotifier {
   /// Closing Flutter releases the desktop UI process. The independent
   /// native TelexMini tray engine continues handling keys.
   Future<void> closeSettingsWindow() async {
-    try { await _channel.invokeMethod<void>('closeUi'); }
-    on MissingPluginException { /* Only available on Windows runner. */ }
+    try {
+      await _channel.invokeMethod<void>('closeUi');
+    } on MissingPluginException {
+      /* Only available on Windows runner. */
+    }
   }
 
   Future<String?> chooseExecutable() async {
-    try { return await _channel.invokeMethod<String>('chooseExecutable'); }
-    on MissingPluginException { return null; }
-    on PlatformException { return null; }
+    try {
+      return await _channel.invokeMethod<String>('chooseExecutable');
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
   }
 
   Future<List<String>> runningProcesses() async {
     try {
-      final names = await _channel.invokeListMethod<String>('listProcesses') ?? <String>[];
+      final names =
+          await _channel.invokeListMethod<String>('listProcesses') ??
+          <String>[];
       return names.toSet().toList()
         ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     } on MissingPluginException {
@@ -303,7 +477,9 @@ class AppController extends ChangeNotifier {
     vietnameseEnabled = value;
     notifyListeners();
     try {
-      await _channel.invokeMethod<void>('setMode', {'vietnameseEnabled': value});
+      await _channel.invokeMethod<void>('setMode', {
+        'vietnameseEnabled': value,
+      });
       nativeConnected = true;
     } on MissingPluginException {
       nativeConnected = false;
@@ -332,42 +508,57 @@ class AppController extends ChangeNotifier {
 
   Future<void> addWord(String word, {required bool vietnamese}) async {
     final normalized = word.trim().toLowerCase();
-    if (normalized.isEmpty || !RegExp(r'^[a-z]{1,64}$').hasMatch(normalized)) return;
-    final list = vietnamese ? vietnameseWords : englishWords;
-    if (!list.contains(normalized)) {
-      list.add(normalized);
-      list.sort();
-      notifyListeners();
-      try {
-        await _channel.invokeMethod<void>('saveDictionary', {
-          'vietnamese': vietnamese,
-          'words': list,
-        });
-        nativeConnected = true;
-      } on MissingPluginException {
-        nativeConnected = false;
-      } on PlatformException {
-        nativeConnected = false;
-      }
-      await save();
+    if (normalized.isEmpty ||
+        normalized.length > 64 ||
+        RegExp(r'^[a-z]+').stringMatch(normalized) != normalized) {
+      throw const FormatException(
+        'Dictionary words must be 1–64 ASCII letters',
+      );
     }
-  }
-
-  Future<void> removeWord(String word, {required bool vietnamese}) async {
     final list = vietnamese ? vietnameseWords : englishWords;
-    if (!list.remove(word)) return;
-    notifyListeners();
+    if (list.contains(normalized)) return;
+    final next = [...list, normalized]..sort();
     try {
       await _channel.invokeMethod<void>('saveDictionary', {
         'vietnamese': vietnamese,
-        'words': list,
+        'words': next,
       });
       nativeConnected = true;
     } on MissingPluginException {
       nativeConnected = false;
+      if (Platform.isWindows && settingsDirectoryOverride == null) rethrow;
     } on PlatformException {
       nativeConnected = false;
+      rethrow;
     }
+    list
+      ..clear()
+      ..addAll(next);
+    notifyListeners();
+    await save();
+  }
+
+  Future<void> removeWord(String word, {required bool vietnamese}) async {
+    final list = vietnamese ? vietnameseWords : englishWords;
+    if (!list.contains(word)) return;
+    final next = [...list]..remove(word);
+    try {
+      await _channel.invokeMethod<void>('saveDictionary', {
+        'vietnamese': vietnamese,
+        'words': next,
+      });
+      nativeConnected = true;
+    } on MissingPluginException {
+      nativeConnected = false;
+      if (Platform.isWindows && settingsDirectoryOverride == null) rethrow;
+    } on PlatformException {
+      nativeConnected = false;
+      rethrow;
+    }
+    list
+      ..clear()
+      ..addAll(next);
+    notifyListeners();
     await save();
   }
 
@@ -382,16 +573,20 @@ class _LocalSettings {
     if (overrideDirectory != null) {
       directory = Directory(overrideDirectory);
     } else if (Platform.isWindows) {
-      final root = Platform.environment['APPDATA'] ??
+      final root =
+          Platform.environment['APPDATA'] ??
           Platform.environment['LOCALAPPDATA'] ??
           Platform.environment['USERPROFILE'] ??
           Directory.current.path;
       directory = Directory('$root/TelexMini/FlutterUI');
     } else if (Platform.isMacOS) {
       final home = Platform.environment['HOME'] ?? Directory.current.path;
-      directory = Directory('$home/Library/Application Support/TelexMini/FlutterUI');
+      directory = Directory(
+        '$home/Library/Application Support/TelexMini/FlutterUI',
+      );
     } else {
-      final home = Platform.environment['XDG_CONFIG_HOME'] ??
+      final home =
+          Platform.environment['XDG_CONFIG_HOME'] ??
           '${Platform.environment['HOME'] ?? Directory.current.path}/.config';
       directory = Directory('$home/telexmini');
     }
@@ -410,7 +605,10 @@ class _LocalSettings {
     }
   }
 
-  static Future<void> write(Map<String, dynamic> data, String? overrideDirectory) async {
+  static Future<void> write(
+    Map<String, dynamic> data,
+    String? overrideDirectory,
+  ) async {
     final file = await _file(overrideDirectory);
     final temporary = File('${file.path}.tmp');
     await temporary.writeAsString(jsonEncode(data), flush: true);

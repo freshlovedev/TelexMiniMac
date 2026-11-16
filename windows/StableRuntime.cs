@@ -87,23 +87,57 @@ namespace TelexMini
             return false;
         }
 
+        static bool InstalledEngineProcessExists(string installed) {
+            foreach(var process in Process.GetProcessesByName("TelexMini")) {
+                using(process) {
+                    try {
+                        string path=process.MainModule.FileName;
+                        if(string.Equals(Path.GetDirectoryName(path),installed,
+                            StringComparison.OrdinalIgnoreCase))return true;
+                    } catch(System.ComponentModel.Win32Exception) {}
+                      catch(InvalidOperationException) {}
+                      catch(System.Security.SecurityException) {}
+                }
+            }
+            return false;
+        }
+        static void WaitForInstalledEngineToExit(string installed) {
+            DateTime deadline=DateTime.UtcNow.AddSeconds(10);
+            while(DateTime.UtcNow<deadline) {
+                if(!InstalledEngineProcessExists(installed))return;
+                Thread.Sleep(70);
+            }
+            throw new IOException("The previous TelexMini executable has not exited yet.");
+        }
+        static void MoveDirectoryWithRetry(string from,string to) {
+            IOException last=null;
+            for(int attempt=0;attempt<7;attempt++) {
+                try {Directory.Move(from,to);return;}
+                catch(IOException error) {
+                    last=error;
+                    Thread.Sleep(130*(attempt+1));
+                }
+            }
+            throw last;
+        }
         static void StopEngineForUpgrade(string installed)
         {
             if(SettingsIsRunningFrom(installed))
                 throw new IOException("Close the TelexMini Settings window before upgrading. Your edits will be preserved by the running version until you close it.");
-            if(!AnEngineIsRunning())return;
-            // Only the TelexMini tray engine created this per-user event.
-            // The old version must exit cleanly to release its DLL and HWND;
-            // never kill another process or request administrator privileges.
-            try {
-                using(var signal=EventWaitHandle.OpenExisting(UpgradeEventName))signal.Set();
-            } catch(WaitHandleCannotBeOpenedException) {
-                throw new IOException("Please exit the previous TelexMini tray icon once, then launch this update again.");
+            if(AnEngineIsRunning()) {
+                try {
+                    using(var signal=EventWaitHandle.OpenExisting(UpgradeEventName))signal.Set();
+                } catch(WaitHandleCannotBeOpenedException) {
+                    throw new IOException("Please exit the previous TelexMini tray icon once, then launch this update again.");
+                }
+                DateTime deadline=DateTime.UtcNow.AddSeconds(10);
+                while(DateTime.UtcNow<deadline && AnEngineIsRunning())Thread.Sleep(60);
+                if(AnEngineIsRunning())
+                    throw new IOException("The previous TelexMini is still running. Exit it from the system tray and retry.");
             }
-            DateTime deadline=DateTime.UtcNow.AddSeconds(10);
-            while(DateTime.UtcNow<deadline && AnEngineIsRunning())Thread.Sleep(60);
-            if(AnEngineIsRunning())
-                throw new IOException("The previous TelexMini is still running. Exit it from the system tray and retry.");
+            // Mutex release can precede final DLL/EXE teardown; wait for the
+            // actual installed process before renaming its directory.
+            WaitForInstalledEngineToExit(installed);
         }
 
         static void MigrateAutoStart(string installedExe)
@@ -157,10 +191,10 @@ namespace TelexMini
                             throw new IOException("Incomplete TelexMini package.");
 
                         if(Directory.Exists(installed)) {
-                            Directory.Move(installed,backup);
+                            MoveDirectoryWithRetry(installed,backup);
                             backedUp=true;
                         }
-                        Directory.Move(staging,installed);
+                        MoveDirectoryWithRetry(staging,installed);
                         installedNew=true;
                         string exe=Path.Combine(installed,"TelexMini.exe");
                         MigrateAutoStart(exe);

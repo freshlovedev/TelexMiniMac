@@ -135,6 +135,8 @@ class BackupService {
     } on MissingPluginException {
       // Unit tests and non-Windows previews have no native bridge.
     }
-    await c.save();
+    // Snippets use a separate canonical native store. Ordinary preference
+    // saves must never overwrite them, including during backup restoration.
+    await c.updateSnippets(snippets);
   }
 }

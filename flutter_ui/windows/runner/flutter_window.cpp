@@ -185,16 +185,8 @@ bool ApplyPreferences(const EncodableMap* map) {
   if (auto dark = ReadBool(map, "darkMode")) values["DarkTheme"] = *dark ? "true" : "false";
   if (auto english = ReadBool(map, "englishUI")) values["UILanguage"] = *english ? "en" : "vi";
   if (!WriteSettings(values)) return false;
-  if (auto snippets = ReadString(map, "snippetText")) {
-    const auto snippetPath = DataDirectory() / L"snippets.tsv";
-    std::ifstream input(snippetPath, std::ios::binary);
-    const std::string current((std::istreambuf_iterator<char>(input)),
-                              std::istreambuf_iterator<char>());
-    if (current != *snippets) {
-      if (!WriteTextFile(L"snippets.tsv", *snippets)) return false;
-      SignalEngineReload();
-    }
-  }
+  // Snippets are persisted by their own validated bridge. A settings
+  // toggle must not overwrite the native snippets.tsv with stale UI data.
   return true;
 }
 
@@ -343,6 +335,11 @@ void HandleTelexMiniMethodCall(
     EncodableMap status;
     status[EncodableValue("vietnameseEnabled")] = EncodableValue(enabled);
     status[EncodableValue("automaticMode")] = EncodableValue(true);
+    const auto priority = values.find("LanguagePriority");
+    const std::string preferred = priority == values.end() ? "Balanced" :
+        (priority->second == "Vietnamese" || priority->second == "English")
+            ? priority->second : "Balanced";
+    status[EncodableValue("languagePriority")] = EncodableValue(preferred);
     result->Success(EncodableValue(status));
     return;
   }
@@ -365,6 +362,59 @@ void HandleTelexMiniMethodCall(
       result->Error("LOCAL_STORAGE", "Could not save native preferences.");
       return;
     }
+    result->Success(EncodableValue());
+    return;
+  }
+  if (call.method_name() == "loadSnippets") {
+    const auto file = DataDirectory() / L"snippets.tsv";
+    if (!std::filesystem::exists(file)) {
+      result->Success(EncodableValue());
+      return;
+    }
+    std::ifstream input(file, std::ios::binary);
+    if (!input) {
+      result->Error("LOCAL_STORAGE", "Cannot read snippets.");
+      return;
+    }
+    std::string contents((std::istreambuf_iterator<char>(input)),
+                          std::istreambuf_iterator<char>());
+    result->Success(EncodableValue(contents));
+    return;
+  }
+  if (call.method_name() == "saveSnippets") {
+    const auto text = ReadString(arguments, "text");
+    if (!text || text->size() > 65536) {
+      result->Error("BAD_ARGUMENT", "Snippets exceed the size limit.");
+      return;
+    }
+    std::set<std::string> keys;
+    std::istringstream rows(*text);
+    std::string row;
+    while (std::getline(rows, row)) {
+      if (row.empty()) continue;
+      if (!row.empty() && row.back() == '\r') row.pop_back();
+      const auto tab = row.find('\t');
+      if (tab < 2 || tab > 48 ||
+          row.find('\t', tab + 1) != std::string::npos ||
+          row.size() <= tab + 1 || row.size() - tab - 1 > 1024) {
+        result->Error("BAD_ARGUMENT", "Invalid snippet row.");
+        return;
+      }
+      std::string key = row.substr(0, tab);
+      std::transform(key.begin(), key.end(), key.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      if (!std::all_of(key.begin(), key.end(),
+                       [](unsigned char c) { return c >= 'a' && c <= 'z'; }) ||
+          !keys.insert(key).second || keys.size() > 256) {
+        result->Error("BAD_ARGUMENT", "Invalid or duplicate shortcut.");
+        return;
+      }
+    }
+    if (!WriteTextFile(L"snippets.tsv", *text)) {
+      result->Error("LOCAL_STORAGE", "Cannot save snippets.");
+      return;
+    }
+    SignalEngineReload();
     result->Success(EncodableValue());
     return;
   }

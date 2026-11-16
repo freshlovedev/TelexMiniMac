@@ -40,7 +40,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Point origin(90, 75);
-  Win32Window::Size size(980, 700);
+  // Comfortable reading area by default. The window can be freely resized
+  // or maximized; Win32Window enforces a DPI-aware minimum size.
+  Win32Window::Size size(1220, 830);
   if (!window.Create(L"TelexMini Settings", origin, size)) {
     ::CoUninitialize();
     ReleaseMutex(guard);

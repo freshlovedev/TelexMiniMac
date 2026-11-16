@@ -9,7 +9,7 @@ namespace TelexMini
     // Explicit, opt-in productivity configuration. No keystroke logging.
     internal sealed class ProductivitySettings:Form
     {
-        readonly CheckBox snippetsOn,profilesOn;
+        readonly ModernSwitch snippetsOn,profilesOn;
         readonly TextBox snippets,profiles;
         internal static bool Open(IWin32Window owner) {
             using(var form=new ProductivitySettings()) return form.ShowDialog(owner)==DialogResult.OK;
@@ -59,8 +59,8 @@ namespace TelexMini
             snippetsCard.Controls.Add(sLayout);
             var sHead=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};
             sHead.Controls.Add(LabelText(UiText.T("Gõ tắt"),11,true,UiPalette.Ink));
-            snippetsOn=new CheckBox {Text=UiText.T("Bật mở rộng sau dấu cách / Enter / Tab"),
-                Checked=UserPreferences.Bool("SnippetsEnabled",false),AutoSize=true,Margin=new Padding(16,2,0,0)};
+            snippetsOn=new ModernSwitch {Text=UiText.T("Bật mở rộng sau dấu cách / Enter / Tab"),
+                Checked=UserPreferences.Bool("SnippetsEnabled",false),Width=470,Height=30,Margin=new Padding(16,0,0,0)};
             sHead.Controls.Add(snippetsOn);sLayout.Controls.Add(sHead,0,0);
             sLayout.Controls.Add(LabelText(UiText.T("Mỗi dòng: phím tắt a-z [Tab] văn bản. Ví dụ: dc → được."),
                 8.7f,false,UiPalette.Muted),0,1);
@@ -77,8 +77,8 @@ namespace TelexMini
             profilesCard.Controls.Add(pLayout);
             var pHead=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};
             pHead.Controls.Add(LabelText(UiText.T("Quy tắc theo ứng dụng"),11,true,UiPalette.Ink));
-            profilesOn=new CheckBox {Text=UiText.T("Kích hoạt hồ sơ ứng dụng"),
-                Checked=UserPreferences.Bool("ProfilesEnabled",false),AutoSize=true,Margin=new Padding(16,2,0,0)};
+            profilesOn=new ModernSwitch {Text=UiText.T("Kích hoạt hồ sơ ứng dụng"),
+                Checked=UserPreferences.Bool("ProfilesEnabled",false),Width=470,Height=30,Margin=new Padding(16,0,0,0)};
             pHead.Controls.Add(profilesOn);pLayout.Controls.Add(pHead,0,0);
             pLayout.Controls.Add(LabelText(UiText.T("Mỗi dòng: process.exe [Tab] English / Vietnamese / Balanced"),
                 8.7f,false,UiPalette.Muted),0,1);
@@ -96,6 +96,7 @@ namespace TelexMini
             var spellLine=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false};
             var spellingInput=new TextBox {Width=190,Height=30};
             var spellingButton=new Button {Text=UiText.T("Gợi ý"),Width=88,Height=30};
+            UiPalette.StyleButton(spellingButton,true);
             var spellingResult=new Label {Text=UiText.T("Không tự động sửa nội dung."),
                 AutoSize=true,ForeColor=UiPalette.Muted,Margin=new Padding(12,7,0,0)};
             spellLine.Controls.Add(spellingInput);spellLine.Controls.Add(spellingButton);spellLine.Controls.Add(spellingResult);
@@ -135,7 +136,7 @@ namespace TelexMini
                 foreach(Control child in c.Controls) child.BackColor=Color.Transparent;
             }
             snippets.BackColor=UiPalette.Field;profiles.BackColor=UiPalette.Field;
-            save.BackColor=UiPalette.Accent;save.ForeColor=Color.White;save.FlatAppearance.BorderSize=0;
+            UiPalette.StyleButton(save,true);UiPalette.StyleButton(cancel);
         }
     }
 

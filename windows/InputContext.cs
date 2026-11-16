@@ -115,9 +115,13 @@ namespace TelexMini
             internal readonly InputContextKind Kind;
             internal readonly uint ProcessId;
             internal readonly int Revision, Tick;
-            internal Snapshot(IntPtr window, IntPtr focus, uint processId, InputContextKind kind, int revision) {
+            // UIA identity distinguishes web fields sharing a native HWND.
+            internal readonly int[] FocusRuntimeId;
+            internal Snapshot(IntPtr window, IntPtr focus, uint processId, InputContextKind kind,
+                              int revision, int[] focusRuntimeId=null) {
                 Window=window; Focus=focus; ProcessId=processId;
                 Kind=kind; Revision=revision; Tick=Environment.TickCount;
+                FocusRuntimeId=focusRuntimeId;
             }
         }
         readonly AutoResetEvent wake=new AutoResetEvent(false);
@@ -132,7 +136,12 @@ namespace TelexMini
         string processName="";
         readonly AutomationFocusChangedEventHandler focusHandler;
         internal InputContextMonitor() {
-            focusHandler=delegate { RequestCheck(); };
+            // Ignore repeated focus events for the identical verified element.
+            // A changed or unknown element/password property is reclassified.
+            focusHandler=delegate(object sender,AutomationFocusChangedEventArgs args) {
+                if(!IsDuplicateFocusNotification(sender as AutomationElement))
+                    RequestCheck();
+            };
             worker=new Thread(Run) { IsBackground=true, Name="Telex Mini focus metadata" };
             worker.SetApartmentState(ApartmentState.MTA); worker.Start();
         }
@@ -154,9 +163,53 @@ namespace TelexMini
             Interlocked.Increment(ref revision);
             wake.Set();
         }
+        internal static bool SameStableFocus(Snapshot a,Snapshot b) {
+            if(a==null || b==null || a.Kind!=b.Kind ||
+               !SnapshotMatches(a,b.Window,b.Focus,b.ProcessId) ||
+               a.FocusRuntimeId==null || b.FocusRuntimeId==null ||
+               a.FocusRuntimeId.Length!=b.FocusRuntimeId.Length)return false;
+            for(int i=0;i<a.FocusRuntimeId.Length;i++)
+                if(a.FocusRuntimeId[i]!=b.FocusRuntimeId[i])return false;
+            return true;
+        }
+        bool IsDuplicateFocusNotification(AutomationElement element) {
+            if(element==null || !enabled || stopped)return false;
+            Snapshot snapshot=current;
+            if(snapshot==null || snapshot.FocusRuntimeId==null ||
+               (snapshot.Kind!=InputContextKind.Text && snapshot.Kind!=InputContextKind.Password) ||
+               snapshot.Revision!=Volatile.Read(ref revision) ||
+               snapshot.Window!=Native.GetForegroundWindow() ||
+               snapshot.Focus!=FocusOf(snapshot.Window))return false;
+            try {
+                int[] runtimeId=element.GetRuntimeId();
+                if(runtimeId==null || runtimeId.Length!=snapshot.FocusRuntimeId.Length)return false;
+                for(int i=0;i<runtimeId.Length;i++)
+                    if(runtimeId[i]!=snapshot.FocusRuntimeId[i])return false;
+                // A password-property change always triggers reclassification.
+                object password=element.GetCurrentPropertyValue(AutomationElement.IsPasswordProperty,true);
+                return password is bool &&
+                       ((bool)password)==(snapshot.Kind==InputContextKind.Password);
+            } catch(ElementNotAvailableException) {} catch(InvalidOperationException) {}
+              catch(COMException) {} catch(UnauthorizedAccessException) {}
+            return false;
+        }
         internal static bool SnapshotMatches(Snapshot snapshot,IntPtr window,IntPtr focus,uint processId) {
             return snapshot!=null && snapshot.Window==window &&
                 snapshot.Focus==focus && snapshot.ProcessId==processId;
+        }
+        internal static bool IsVerifiedClassification(Snapshot snapshot,IntPtr window,
+                                                     IntPtr focus,uint processId,int currentRevision) {
+            if(!SnapshotMatches(snapshot,window,focus,processId,currentRevision))return false;
+            if(snapshot.Kind==InputContextKind.Terminal)return true;
+            // No shortcut when the web/UIA element cannot be identified:
+            // password detection remains fail-closed.
+            return (snapshot.Kind==InputContextKind.Text ||
+                    snapshot.Kind==InputContextKind.Password) &&
+                   snapshot.FocusRuntimeId!=null;
+        }
+        internal bool HasVerifiedClassification(IntPtr window,IntPtr focus,uint processId) {
+            return IsVerifiedClassification(current,window,focus,processId,
+                Volatile.Read(ref revision));
         }
         internal static bool SnapshotMatches(Snapshot snapshot,IntPtr window,IntPtr focus,
                                              uint processId,int currentRevision) {
@@ -202,6 +255,7 @@ namespace TelexMini
             // Avoid re-querying UI Automation every 750 ms for an unchanged field.
             if(SnapshotMatches(cached,window,focus,pid,version)) return;
             InputContextKind kind=InputContextKind.Unavailable;
+            int[] focusRuntimeId=null;
             try {
                 if(pid!=lastProcess) {
                     using(var process=Process.GetProcessById((int)pid)) processName=process.ProcessName;
@@ -215,7 +269,10 @@ namespace TelexMini
                     AutomationElement element=AutomationElement.FocusedElement;
                     if(element!=null) {
                         object password=element.GetCurrentPropertyValue(AutomationElement.IsPasswordProperty,true);
-                        if(password is bool) kind=(bool)password ? InputContextKind.Password : InputContextKind.Text;
+                        if(password is bool) {
+                            kind=(bool)password ? InputContextKind.Password : InputContextKind.Text;
+                            focusRuntimeId=element.GetRuntimeId();
+                        }
                     }
                 }
             } catch(ElementNotAvailableException) { }
@@ -225,7 +282,7 @@ namespace TelexMini
               catch(COMException) { }
               catch(UnauthorizedAccessException) { }
             if(enabled && !stopped && version==Volatile.Read(ref revision) && window==Native.GetForegroundWindow() && focus==FocusOf(window))
-                current=new Snapshot(window,focus,pid,kind,version);
+                current=new Snapshot(window,focus,pid,kind,version,focusRuntimeId);
         }
         void Run() {
             bool subscribed=false;
