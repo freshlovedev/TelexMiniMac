@@ -32,7 +32,8 @@ class MainFlutterWindow: NSWindow {
         case "getStatus":
           result([
             "vietnameseEnabled": self.suite.object(forKey: "vietnameseEnabled") as? Bool ?? true,
-            "automaticMode": true
+            "automaticMode": true,
+            "languagePriority": self.suite.string(forKey: "languagePriority") ?? "Balanced"
           ])
         case "setMode":
           guard let args = call.arguments as? [String: Any],
@@ -49,11 +50,39 @@ class MainFlutterWindow: NSWindow {
           }
           self.applyPreferences(args)
           result(nil)
+        case "closeUi":
+          result(nil)
+          DispatchQueue.main.async { [weak self] in self?.close() }
+        case "chooseExecutable":
+          let panel = NSOpenPanel()
+          panel.canChooseDirectories = true
+          panel.canChooseFiles = false
+          panel.allowsMultipleSelection = false
+          panel.message = "Choose a macOS .app bundle"
+          if panel.runModal() == .OK, let url = panel.url,
+             url.pathExtension.lowercased() == "app",
+             let identifier = Bundle(url: url)?.bundleIdentifier {
+            result(identifier)
+          } else {
+            result(nil)
+          }
         case "listProcesses":
           let identifiers = NSWorkspace.shared.runningApplications
             .compactMap { $0.bundleIdentifier }
             .filter { !$0.isEmpty }
           result(Array(Set(identifiers)).sorted())
+        case "loadSnippets":
+          result(Self.readLocalFile("snippets.tsv"))
+        case "saveSnippets":
+          guard let args = call.arguments as? [String: Any],
+                let text = args["text"] as? String,
+                let validated = Self.validatedSnippetText(text) else {
+            result(FlutterError(code: "BAD_ARGUMENT", message: "Invalid snippets.", details: nil))
+            return
+          }
+          try Self.writeLocalFile(validated, named: "snippets.tsv")
+          try self.signalEngineReload()
+          result(nil)
         case "loadProfiles":
           result(self.readProfiles())
         case "saveProfiles":
@@ -97,7 +126,8 @@ class MainFlutterWindow: NSWindow {
   private func applyPreferences(_ values: [String: Any]) {
     let booleanKeys = [
       "smartEnglish", "restoreInvalid", "darkMode",
-      "snippetsEnabled", "profilesEnabled", "vietnameseEnabled"
+      "snippetsEnabled", "profilesEnabled", "vietnameseEnabled",
+      "instantRepairEnabled", "adaptiveLearningEnabled", "smartPunctuationEnabled", "autoStart"
     ]
     for key in booleanKeys {
       if let value = values[key] as? Bool {
@@ -117,11 +147,16 @@ class MainFlutterWindow: NSWindow {
     if let englishUI = values["englishUI"] as? Bool {
       suite.set(englishUI ? "en" : "vi", forKey: "uiLanguage")
     }
-    if let snippets = values["snippetText"] as? String,
-       let validated = Self.validatedSnippetText(snippets) {
-      try? Self.writeLocalFile(validated, named: "snippets.tsv")
-    }
+    // Snippet data is only changed by saveSnippets, never by an
+    // unrelated preference write (which may contain stale Flutter JSON).
     try? signalEngineReload()
+  }
+
+  private static func readLocalFile(_ filename: String) -> String {
+    let file = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent("Library/Application Support/TelexMini", isDirectory: true)
+      .appendingPathComponent(filename)
+    return (try? String(contentsOf: file, encoding: .utf8)) ?? ""
   }
 
   private func readProfiles() -> String {

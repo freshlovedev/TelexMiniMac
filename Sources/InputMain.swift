@@ -6,6 +6,7 @@ import InputMethodKit
 final class TelexInputController: IMKInputController {
     private let composer=TelexComposer()
     private var isComposing=false
+    private var literalSnippetMode=false
     private var vietnameseEnabled=true
     private var shortcut="Ctrl + Shift + Space"
     private var snippetRules=[String:String]()
@@ -74,12 +75,14 @@ final class TelexInputController: IMKInputController {
     }
     private func finish(_ sender: Any?) {
         if isComposing {
-            let final=composer.finish()
-            let expanded=ProductivityCore.expand(composer.raw,rules:snippetRules,enabled:snippetsEnabled)
+            let original=composer.raw
+            let final=literalSnippetMode ? original : composer.finish()
+            let expanded=ProductivityCore.expand(original,rules:snippetRules,enabled:snippetsEnabled)
             clientText(sender)?.insertText(expanded ?? final,replacementRange:notFound)
         }
         composer.reset()
         isComposing=false
+        literalSnippetMode=false
     }
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
@@ -103,7 +106,8 @@ final class TelexInputController: IMKInputController {
                 .set(vietnameseEnabled,forKey:"vietnameseEnabled")
             return true
         }
-        if !vietnameseEnabled || profileMode=="English" {finish(sender);return false}
+        let literalMode = !vietnameseEnabled || profileMode=="English"
+        if literalMode && !snippetsEnabled {finish(sender);return false}
         // Secure fields are normally handled by the system's Roman input source.
         // Never inspect the receiving application's existing text.
         if event.modifierFlags.intersection([.command,.control,.option]).isEmpty == false {
@@ -112,7 +116,17 @@ final class TelexInputController: IMKInputController {
         }
         guard let key=event.characters, !key.isEmpty else { return false }
         if event.keyCode == 51 { // Backspace: adjust current composition only.
-            if isComposing { composer.backspace(); mark(sender); return true }
+            if isComposing {
+                composer.backspace()
+                if literalSnippetMode {
+                    let raw=composer.raw
+                    clientText(sender)?.setMarkedText(raw,
+                        selectionRange:NSRange(location:(raw as NSString).length,length:0),
+                        replacementRange:notFound)
+                    isComposing = !raw.isEmpty
+                } else { mark(sender) }
+                return true
+            }
             return false
         }
         if event.keyCode == 53 { finish(sender); return false }
@@ -125,8 +139,16 @@ final class TelexInputController: IMKInputController {
            ((char >= "a" && char <= "z") || (char >= "A" && char <= "Z") ||
             (composer.useVni && char >= "1" && char <= "9")) {
             if composer.raw.count >= 63 { finish(sender); return false }
+            if isComposing && literalSnippetMode != literalMode { finish(sender) }
             _ = composer.push(char)
-            mark(sender)
+            literalSnippetMode=literalMode
+            if literalMode {
+                let raw=composer.raw
+                clientText(sender)?.setMarkedText(raw,
+                    selectionRange:NSRange(location:(raw as NSString).length,length:0),
+                    replacementRange:notFound)
+                isComposing = true
+            } else { mark(sender) }
             return true
         }
         finish(sender)
