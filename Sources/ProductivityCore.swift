@@ -49,16 +49,34 @@ enum ProductivityCore {
         if app.hasSuffix(".exe"){app=String(app.dropLast(4))}
         return rules[app] ?? "Default"
     }
-    static func expand(_ word:String,rules:[String:String],enabled:Bool)->String? {
+    static func expand(_ word:String,rules:[String:String],enabled:Bool,
+                       clipboardProvider:(()->String?)?=nil)->String? {
         guard enabled,let value=rules[word.lowercased()] else {return nil}
-        let current=Date()
-        let day=DateFormatter(),clock=DateFormatter()
-        day.locale=Locale(identifier:"en_US_POSIX")
+        // IMK has no guaranteed permission-free caret repositioning API after
+        // text is committed. Never insert a literal {cursor} marker.
+        guard !value.contains("{cursor}") else {return nil}
+        let now=Date()
+        let day=DateFormatter(),clock=DateFormatter(),dateTime=DateFormatter()
+        for formatter in [day,clock,dateTime] {
+            formatter.locale=Locale(identifier:"en_US_POSIX")
+        }
         day.dateFormat="yyyy-MM-dd"
-        clock.locale=Locale(identifier:"en_US_POSIX")
         clock.dateFormat="HH:mm"
-        return value.replacingOccurrences(of:"{date}",with:day.string(from:current))
-                    .replacingOccurrences(of:"{time}",with:clock.string(from:current))
+        dateTime.dateFormat="yyyy-MM-dd HH:mm"
+        var expanded=value.replacingOccurrences(of:"{date}",with:day.string(from:now))
+                          .replacingOccurrences(of:"{time}",with:clock.string(from:now))
+                          .replacingOccurrences(of:"{datetime}",with:dateTime.string(from:now))
+        // Clipboard is read ONLY when the user triggers a rule with this macro.
+        if expanded.contains("{clipboard}") {
+            guard let clipboard=clipboardProvider?() else {return nil}
+            let singleLine=String(clipboard.prefix(1024))
+                .replacingOccurrences(of:"[\\r\\n\\t]",with:" ",
+                                      options:.regularExpression)
+            expanded=expanded.replacingOccurrences(of:"{clipboard}",with:singleLine)
+        }
+        return expanded.replacingOccurrences(of:"\\r\\n",with:"\n")
+                       .replacingOccurrences(of:"\\n",with:"\n")
+                       .replacingOccurrences(of:"\\t",with:"\t")
     }
     static func save(_ text:String,to filename:String)throws {
         try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)

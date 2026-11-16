@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'controller.dart';
@@ -247,8 +249,16 @@ class _SnippetListPageState extends State<SnippetListPage> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   c.t(
-                    'Biến mẫu: {date}, {time}, {datetime}, {clipboard}, {cursor}. Có thể xuống dòng; clipboard chỉ đọc khi kích hoạt.',
-                    'Macros: {date}, {time}, {datetime}, {clipboard}, {cursor}. Multiline; clipboard read on trigger only.',
+                    Platform.isWindows
+                        ? 'Biến mẫu: {date}, {time}, {datetime}, {clipboard}, {cursor}. Có thể xuống dòng; clipboard chỉ đọc khi kích hoạt.'
+                        : Platform.isMacOS
+                        ? 'macOS: {date}, {time}, {datetime}, {clipboard} (chỉ khi kích hoạt), xuống dòng. Chưa hỗ trợ {cursor}.'
+                        : 'Linux: {date}, {time}, {datetime}, xuống dòng. Chưa hỗ trợ {clipboard}, {cursor}.',
+                    Platform.isWindows
+                        ? 'Macros: {date}, {time}, {datetime}, {clipboard}, {cursor}. Multiline; clipboard read on trigger only.'
+                        : Platform.isMacOS
+                        ? 'macOS: {date}, {time}, {datetime}, {clipboard} on trigger, escaped newlines. {cursor} not supported.'
+                        : 'Linux: {date}, {time}, {datetime}, escaped newlines. {clipboard}, {cursor} not supported.',
                   ),
                   style: const TextStyle(fontSize: 11, color: muted),
                 ),
@@ -258,8 +268,12 @@ class _SnippetListPageState extends State<SnippetListPage> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   c.t(
-                    'Smart Undo: Backspace ngay sau gõ tắt bằng dấu cách để trở lại phím tắt (trong ô văn bản được hỗ trợ).',
-                    'Smart Undo: Backspace immediately after Space expansion restores the shortcut in supported text fields.',
+                    Platform.isWindows
+                        ? 'Smart Undo: Backspace ngay sau gõ tắt bằng dấu cách để trở lại phím tắt (trong ô văn bản được hỗ trợ).'
+                        : 'Backspace sửa nội dung đang gõ; hoàn tác gõ tắt sau khi chèn hiện chỉ hỗ trợ trên Windows.',
+                    Platform.isWindows
+                        ? 'Smart Undo: Backspace immediately after Space expansion restores the shortcut in supported text fields.'
+                        : 'Backspace edits uncommitted input. Undo after expansion is Windows-only.',
                   ),
                   style: const TextStyle(fontSize: 11, color: muted),
                 ),

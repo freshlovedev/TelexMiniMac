@@ -25,6 +25,8 @@ fi
 printf '[TelexMini]\nVietnameseEnabled=true\nInputMethod=Telex\nSmartEnglish=true\nRestoreInvalid=true\nLanguagePriority=Balanced\n' \
   > "$CONFIG/preferences.ini"
 export TELEXMINI_QA_CONFIG_DIR="$CONFIG"
+export TELEXMINI_QA_INSTANCE=1
+export TELEXMINI_IBUS_QA_NAME=telexmini-qa
 export TELEXMINI_CONFIG_DIR="$CONFIG"
 export TELEXMINI_LEXICON_PATH="$ROOT/Resources/english-core.txt"
 "$ENGINE" > "$LOG" 2>&1 &

@@ -64,16 +64,17 @@ def main():
     atexit.register(restore)
     context.focus_in()
     flush_events()
+    qa_engine = os.environ.get("TELEXMINI_IBUS_QA_NAME", "telexmini")
     if global_engine:
-        bus.set_global_engine("telexmini")
+        bus.set_global_engine(qa_engine)
     else:
-        context.set_engine("telexmini")
+        context.set_engine(qa_engine)
     flush_events()
     engine = context.get_engine()
     active = bus.get_global_engine()
     print("GLOBAL=" + (active.get_name() if active else "NONE"), flush=True)
     print("ENGINE=" + (engine.get_name() if engine else "NONE"), flush=True)
-    if engine is None or engine.get_name() != "telexmini":
+    if engine is None or engine.get_name() != qa_engine:
         restore()
         atexit.unregister(restore)
         return 2
@@ -120,14 +121,16 @@ def main():
         preferences = directory / "preferences.ini"
         overrides = directory / "VietnameseOverrides.txt"
 
-        def write_preferences(enabled=True, method="Telex"):
+        def write_preferences(enabled=True, method="Telex", priority="Balanced",
+                              snippets=False):
             text = (
                 "[TelexMini]\n"
                 f"VietnameseEnabled={'true' if enabled else 'false'}\n"
                 f"InputMethod={method}\n"
                 "SmartEnglish=true\n"
                 "RestoreInvalid=true\n"
-                "LanguagePriority=Balanced\n"
+                f"LanguagePriority={priority}\n"
+                f"SnippetsEnabled={'true' if snippets else 'false'}\n"
             )
             temporary = preferences.with_suffix(".ini.tmp")
             temporary.write_text(text, encoding="utf-8")
@@ -174,6 +177,23 @@ def main():
         (directory / "dictionary-reload.flag").write_text("reload cleared\n", encoding="utf-8")
         time.sleep(0.22)
         try_word("boost", "boost", "English dictionary restore")
+
+        # Expand raw shortcuts despite Telex conversion or English mode.
+        snippet_path = directory / "snippets.tsv"
+        snippet_path.write_text("dc\tĐịa chỉ:\ndd\tDấu d:\n", encoding="utf-8")
+        write_preferences(enabled=True, snippets=True)
+        try_word("dc", "Địa chỉ:", "Vietnamese snippet")
+        try_word("dd", "Dấu d:", "Telex-collision snippet")
+        write_preferences(enabled=False, snippets=True)
+        try_word("dc", "Địa chỉ:", "English mode snippet")
+        try_word("dd", "Dấu d:", "English mode Telex-collision snippet")
+        try_word("boost", "boost", "Literal English with snippets enabled")
+        write_preferences(enabled=True, priority="Vietnamese")
+        try_word("boost", "bốt", "Vietnamese-first mode")
+        write_preferences(enabled=True, priority="English")
+        try_word("been", "been", "English-first mode")
+        write_preferences(enabled=True)
+        try_word("been", "bên", "Balanced mode restored")
         print(f"IBUS_HOT_RELOAD_QA cases={extra_cases} current_failures={fails}", flush=True)
 
     # Password input scopes should pass all physical keys through unchanged.

@@ -135,6 +135,21 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// Desktop-native login item: failed registration restores the UI state.
+  Future<void> setAutoStart(bool enabled) async {
+    if (autoStart == enabled) return;
+    final previous = autoStart;
+    autoStart = enabled;
+    notifyListeners();
+    try {
+      await save(requireNative: true);
+    } catch (_) {
+      autoStart = previous;
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   /// Snippets are stored in native snippets.tsv, not overwritten on every
   /// settings change. Commit in-memory state only after a successful save.
   Future<void> updateSnippets(String updated) async {
@@ -202,6 +217,7 @@ class AppController extends ChangeNotifier {
         vietnameseEnabled =
             status['vietnameseEnabled'] as bool? ?? vietnameseEnabled;
         automaticMode = status['automaticMode'] as bool? ?? automaticMode;
+        autoStart = status['autoStart'] as bool? ?? autoStart;
         final priority = status['languagePriority'] as String?;
         if (priority != null && languagePriorities.contains(priority)) {
           languagePriority = priority;
@@ -398,9 +414,7 @@ class AppController extends ChangeNotifier {
       nativeConnected = true;
     } on MissingPluginException {
       nativeConnected = false;
-      if (requireNative &&
-          Platform.isWindows &&
-          settingsDirectoryOverride == null) {
+      if (requireNative && settingsDirectoryOverride == null) {
         rethrow;
       }
     } on PlatformException {

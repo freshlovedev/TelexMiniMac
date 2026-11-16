@@ -1,5 +1,6 @@
 import Cocoa
 import FlutterMacOS
+import ServiceManagement
 
 class MainFlutterWindow: NSWindow {
   private let suite = UserDefaults(suiteName: "com.telexmini.mac") ?? .standard
@@ -33,7 +34,8 @@ class MainFlutterWindow: NSWindow {
           result([
             "vietnameseEnabled": self.suite.object(forKey: "vietnameseEnabled") as? Bool ?? true,
             "automaticMode": true,
-            "languagePriority": self.suite.string(forKey: "languagePriority") ?? "Balanced"
+            "languagePriority": self.suite.string(forKey: "languagePriority") ?? "Balanced",
+            "autoStart": self.loginItemEnabled
           ])
         case "setMode":
           guard let args = call.arguments as? [String: Any],
@@ -48,7 +50,7 @@ class MainFlutterWindow: NSWindow {
             result(FlutterError(code: "BAD_ARGUMENT", message: "Expected a preferences map.", details: nil))
             return
           }
-          self.applyPreferences(args)
+          try self.applyPreferences(args)
           result(nil)
         case "closeUi":
           result(nil)
@@ -123,11 +125,36 @@ class MainFlutterWindow: NSWindow {
     }
   }
 
-  private func applyPreferences(_ values: [String: Any]) {
+  private var loginItemEnabled: Bool {
+    if #available(macOS 13.0, *) {
+      return SMAppService.mainApp.status == .enabled
+    }
+    return false
+  }
+
+  private func applyPreferences(_ values: [String: Any]) throws {
+    // User-owned Login Items; do not silently store a preference that is inert.
+    if let enabled = values["autoStart"] as? Bool {
+      if #available(macOS 13.0, *) {
+        let service = SMAppService.mainApp
+        if enabled && service.status != .enabled &&
+           service.status != .requiresApproval {
+          try service.register()
+        } else if !enabled && (service.status == .enabled ||
+                               service.status == .requiresApproval) {
+          try service.unregister()
+        }
+      } else if enabled {
+        throw NSError(domain: "TelexMini", code: 13,
+                      userInfo: [NSLocalizedDescriptionKey:
+                        "Login Items require macOS 13 or later."])
+      }
+    }
     let booleanKeys = [
       "smartEnglish", "restoreInvalid", "darkMode",
       "snippetsEnabled", "profilesEnabled", "vietnameseEnabled",
-      "instantRepairEnabled", "adaptiveLearningEnabled", "smartPunctuationEnabled", "autoStart"
+      "instantRepairEnabled", "adaptiveLearningEnabled", "smartPunctuationEnabled",
+      "terminalEnglish"
     ]
     for key in booleanKeys {
       if let value = values[key] as? Bool {

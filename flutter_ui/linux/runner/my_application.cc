@@ -6,6 +6,8 @@
 #endif
 
 #include <string.h>
+#include <errno.h>
+#include <glib/gstdio.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -78,6 +80,27 @@ static gboolean telexmini_write_file(const gchar* name, const gchar* contents,
   return g_file_set_contents(path, contents, length, NULL);
 }
 
+// User-owned login item; never changes the desktop input-source selection.
+static gboolean telexmini_set_autostart(gboolean enabled) {
+  g_autofree gchar* dir = g_build_filename(
+      g_get_user_config_dir(), "autostart", NULL);
+  g_autofree gchar* file = g_build_filename(
+      dir, "telexmini-input-service.desktop", NULL);
+  if (!enabled) {
+    if (g_remove(file) != 0 && errno != ENOENT) return FALSE;
+    return TRUE;
+  }
+  g_autofree gchar* source = g_build_filename(
+      g_get_home_dir(), ".local", "libexec", "telexmini-ibus", NULL);
+  if (!g_file_test(source, G_FILE_TEST_IS_EXECUTABLE)) return FALSE;
+  if (g_mkdir_with_parents(dir, 0700) != 0) return FALSE;
+  g_autofree gchar* desktop = g_strdup_printf(
+      "[Desktop Entry]\nType=Application\nName=TelexMini input service\n"
+      "Exec=%s\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n"
+      "OnlyShowIn=GNOME;\n", source);
+  return g_file_set_contents(file, desktop, -1, NULL);
+}
+
 static gboolean telexmini_valid_word(const gchar* word) {
   if (word == NULL || *word == '\0' || strlen(word) > 64) return FALSE;
   for (const gchar* p = word; *p != '\0'; ++p) {
@@ -93,6 +116,12 @@ static FlMethodResponse* telexmini_handle_call(const gchar* method, FlValue* arg
     fl_value_set_string_take(status, "vietnameseEnabled",
       fl_value_new_bool(telexmini_get_bool(key_file, "VietnameseEnabled", TRUE)));
     fl_value_set_string_take(status, "automaticMode", fl_value_new_bool(TRUE));
+    fl_value_set_string_take(status, "autoStart",
+      fl_value_new_bool(telexmini_get_bool(key_file, "AutoStart", FALSE)));
+    g_autofree gchar* priority = g_key_file_get_string(key_file, "TelexMini", "LanguagePriority", NULL);
+    fl_value_set_string_take(status, "languagePriority",
+      fl_value_new_string(priority && (g_strcmp0(priority,"English")==0 ||
+            g_strcmp0(priority,"Vietnamese")==0) ? priority : "Balanced"));
     return FL_METHOD_RESPONSE(fl_method_success_response_new(status));
   }
 
@@ -128,6 +157,15 @@ static FlMethodResponse* telexmini_handle_call(const gchar* method, FlValue* arg
     telexmini_set_bool_from_args(key_file, args, "terminalEnglish", "AutoEnglish");
     telexmini_set_bool_from_args(key_file, args, "snippetsEnabled", "SnippetsEnabled");
     telexmini_set_bool_from_args(key_file, args, "profilesEnabled", "ProfilesEnabled");
+    FlValue* startup = fl_value_lookup_string(args, "autoStart");
+    if (startup != NULL && fl_value_get_type(startup) == FL_VALUE_TYPE_BOOL) {
+      const gboolean enabled = fl_value_get_bool(startup);
+      if (!telexmini_set_autostart(enabled)) {
+        return FL_METHOD_RESPONSE(fl_method_error_response_new(
+          "LOCAL_STORAGE", "Could not update user autostart. Install TelexMini first.", NULL));
+      }
+      g_key_file_set_boolean(key_file, "TelexMini", "AutoStart", enabled);
+    }
     telexmini_set_string_from_args(key_file, args, "inputMethod", "InputMethod");
     telexmini_set_string_from_args(key_file, args, "languagePriority", "LanguagePriority");
     telexmini_set_string_from_args(key_file, args, "hotkey", "Hotkey");
@@ -138,14 +176,120 @@ static FlMethodResponse* telexmini_handle_call(const gchar* method, FlValue* arg
     FlValue* english_ui = fl_value_lookup_string(args, "englishUI");
     if (english_ui != NULL && fl_value_get_type(english_ui) == FL_VALUE_TYPE_BOOL)
       g_key_file_set_string(key_file, "TelexMini", "UILanguage", fl_value_get_bool(english_ui) ? "en" : "vi");
-    FlValue* snippets = fl_value_lookup_string(args, "snippetText");
-    if (snippets != NULL && fl_value_get_type(snippets) == FL_VALUE_TYPE_STRING) {
-      telexmini_write_file("snippets.tsv", fl_value_get_string(snippets), -1);
-    }
+    // Snippets belong to saveSnippets only. A preferences snapshot may
+    // contain obsolete values and must never overwrite the native store.
     if (!telexmini_save_settings(key_file)) {
       return FL_METHOD_RESPONSE(fl_method_error_response_new(
         "LOCAL_STORAGE", "Could not save preferences.", NULL));
     }
+    telexmini_write_file("dictionary-reload.flag", "reload\n", -1);
+    return FL_METHOD_RESPONSE(fl_method_success_response_new(NULL));
+  }
+
+  if (g_strcmp0(method, "closeUi") == 0) {
+    g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, [](gpointer)->gboolean {
+      GApplication* app = g_application_get_default();
+      if (app) g_application_quit(app);
+      return G_SOURCE_REMOVE;
+    }, NULL, NULL);
+    return FL_METHOD_RESPONSE(fl_method_success_response_new(NULL));
+  }
+
+  if (g_strcmp0(method, "listProcesses") == 0) {
+    g_autoptr(FlValue) processes = fl_value_new_list();
+    g_autoptr(GHashTable) unique = g_hash_table_new_full(
+      g_str_hash, g_str_equal, g_free, NULL);
+    GDir* directory = g_dir_open("/proc", 0, NULL);
+    if (directory) {
+      const gchar* entry;
+      while ((entry = g_dir_read_name(directory)) != NULL &&
+             g_hash_table_size(unique) < 1000) {
+        if (!g_ascii_isdigit(entry[0])) continue;
+        gboolean numeric = TRUE;
+        for (const gchar* p=entry; *p; ++p) {
+          if (!g_ascii_isdigit(*p)) { numeric = FALSE; break; }
+        }
+        if (!numeric) continue;
+        g_autofree gchar* path = g_build_filename("/proc", entry, "comm", NULL);
+        g_autofree gchar* comm = NULL;
+        if (!g_file_get_contents(path, &comm, NULL, NULL) || !comm) continue;
+        g_strstrip(comm);
+        if (!*comm || strlen(comm) > 255 || g_hash_table_contains(unique, comm))
+          continue;
+        g_hash_table_add(unique, g_strdup(comm));
+        fl_value_append_take(processes, fl_value_new_string(comm));
+      }
+      g_dir_close(directory);
+    }
+    return FL_METHOD_RESPONSE(fl_method_success_response_new(processes));
+  }
+
+  if (g_strcmp0(method, "loadSnippets") == 0 ||
+      g_strcmp0(method, "loadProfiles") == 0) {
+    const gchar* filename = g_strcmp0(method, "loadSnippets") == 0
+      ? "snippets.tsv" : "profiles.tsv";
+    g_autofree gchar* directory = telexmini_data_directory();
+    g_autofree gchar* path = g_build_filename(directory, filename, NULL);
+    gchar* text = NULL;
+    gsize size = 0;
+    if (!g_file_get_contents(path, &text, &size, NULL))
+      return FL_METHOD_RESPONSE(fl_method_success_response_new(fl_value_new_string("")));
+    if (size > 65536) {
+      g_free(text);
+      return FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "LOCAL_STORAGE", "Stored text exceeds limit.", NULL));
+    }
+    g_autoptr(FlValue) value = fl_value_new_string(text);
+    g_free(text);
+    return FL_METHOD_RESPONSE(fl_method_success_response_new(value));
+  }
+
+  if (g_strcmp0(method, "saveSnippets") == 0 ||
+      g_strcmp0(method, "saveProfiles") == 0) {
+    if (args == NULL || fl_value_get_type(args) != FL_VALUE_TYPE_MAP)
+      return FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "BAD_ARGUMENT", "Expected text map.", NULL));
+    FlValue* value = fl_value_lookup_string(args, "text");
+    if (value == NULL || fl_value_get_type(value) != FL_VALUE_TYPE_STRING)
+      return FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "BAD_ARGUMENT", "Expected text string.", NULL));
+    const gchar* contents = fl_value_get_string(value);
+    if (strlen(contents) > 65536) return FL_METHOD_RESPONSE(fl_method_error_response_new(
+      "BAD_ARGUMENT", "Text limit exceeded.", NULL));
+    const gboolean snippets = g_strcmp0(method, "saveSnippets") == 0;
+    g_auto(GStrv) lines = g_strsplit(contents, "\n", -1);
+    g_autoptr(GHashTable) seen = g_hash_table_new_full(
+        g_str_hash, g_str_equal, g_free, NULL);
+    for (gsize i = 0; lines[i] != NULL; i++) {
+      if (!*lines[i]) continue;
+      gchar* line = lines[i];
+      gchar* tab = strchr(line, '\t');
+      if (!tab || strchr(tab+1, '\t'))
+        return FL_METHOD_RESPONSE(fl_method_error_response_new(
+          "BAD_ARGUMENT", "Each line must contain one tab.", NULL));
+      gchar* key = g_strndup(line, tab-line);
+      const gchar* replacement = tab+1;
+      gboolean valid = strlen(replacement)>0 &&
+         strlen(replacement)<=(snippets ? 1024 : 24) &&
+         strlen(key)>=(snippets ? 2 : 1) &&
+         strlen(key)<=(snippets ? 48 : 255);
+      for(const gchar* p=key; *p && valid; p++) {
+        valid = (*p>='a' && *p<='z') ||
+          (!snippets && ((*p>='A' && *p<='Z') ||
+          (*p>='0' && *p<='9') || *p=='-' || *p=='_' || *p=='.'));
+      }
+      if (!snippets && !(g_strcmp0(replacement,"English")==0 ||
+            g_strcmp0(replacement,"Vietnamese")==0 ||
+            g_strcmp0(replacement,"Balanced")==0)) valid=FALSE;
+      if(g_hash_table_contains(seen,key))valid=FALSE;
+      if(valid)g_hash_table_add(seen,key); else g_free(key);
+      if(!valid || g_hash_table_size(seen)>(snippets ? 256 : 200))
+        return FL_METHOD_RESPONSE(fl_method_error_response_new(
+          "BAD_ARGUMENT", "Invalid or duplicated row.", NULL));
+    }
+    if(!telexmini_write_file(snippets?"snippets.tsv":"profiles.tsv",contents,-1))
+      return FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "LOCAL_STORAGE", "Could not save text.", NULL));
     telexmini_write_file("dictionary-reload.flag", "reload\n", -1);
     return FL_METHOD_RESPONSE(fl_method_success_response_new(NULL));
   }

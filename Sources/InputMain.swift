@@ -8,6 +8,13 @@ final class TelexInputController: IMKInputController {
     private var isComposing=false
     private var literalSnippetMode=false
     private var vietnameseEnabled=true
+    private var terminalEnglish=false
+    private static let terminalAppIds:Set<String> = [
+        "com.apple.terminal", "com.googlecode.iterm2",
+        "dev.warp.warp-stable", "dev.warp.warp",
+        "net.kovidgoyal.kitty", "org.alacritty",
+        "com.mitchellh.ghostty"
+    ]
     private var shortcut="Ctrl + Shift + Space"
     private var snippetRules=[String:String]()
     private var profileRules=[String:String]()
@@ -23,6 +30,7 @@ final class TelexInputController: IMKInputController {
         let defaults=UserDefaults(suiteName:"com.telexmini.mac") ?? .standard
         snippetsEnabled=defaults.bool(forKey:"snippetsEnabled")
         profilesEnabled=defaults.bool(forKey:"profilesEnabled")
+        terminalEnglish=defaults.bool(forKey:"terminalEnglish")
         if let sharedMode=defaults.object(forKey:"vietnameseEnabled") as? Bool {
             vietnameseEnabled=sharedMode
         }
@@ -77,7 +85,9 @@ final class TelexInputController: IMKInputController {
         if isComposing {
             let original=composer.raw
             let final=literalSnippetMode ? original : composer.finish()
-            let expanded=ProductivityCore.expand(original,rules:snippetRules,enabled:snippetsEnabled)
+            let expanded=ProductivityCore.expand(
+                original,rules:snippetRules,enabled:snippetsEnabled,
+                clipboardProvider: { NSPasteboard.general.string(forType:.string) })
             clientText(sender)?.insertText(expanded ?? final,replacementRange:notFound)
         }
         composer.reset()
@@ -106,7 +116,10 @@ final class TelexInputController: IMKInputController {
                 .set(vietnameseEnabled,forKey:"vietnameseEnabled")
             return true
         }
-        let literalMode = !vietnameseEnabled || profileMode=="English"
+        let currentApp=NSWorkspace.shared.frontmostApplication?
+            .bundleIdentifier?.lowercased() ?? ""
+        let literalMode = !vietnameseEnabled || profileMode=="English" ||
+                          (terminalEnglish && Self.terminalAppIds.contains(currentApp))
         if literalMode && !snippetsEnabled {finish(sender);return false}
         // Secure fields are normally handled by the system's Roman input source.
         // Never inspect the receiving application's existing text.

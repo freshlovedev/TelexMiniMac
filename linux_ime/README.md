@@ -15,13 +15,24 @@ for normal-user operation, without an Administrator/root install.
 ## Linux user-only install (Ubuntu / GNOME)
 
 Prerequisite: existing IBus or Fcitx5 is already installed on the OS.
-Build from the current source as an ordinary user:
+Choose either the source build or packaged release as an ordinary user:
 
 ```bash
+# Existing source checkout:
 bash linux_ime/build.sh all
 bash tools/build-flutter-ui-linux.sh
+bash tools/package-linux.sh
+bash tools/install-linux-user.sh install
+
+# From TelexMini-Linux-x86_64.tar.gz:
+tar xzf TelexMini-Linux-x86_64.tar.gz
+cd TelexMini-Linux-x86_64
 bash tools/install-linux-user.sh install
 ```
+
+The installer updates binaries through staged directories and atomic moves,
+without overwriting mapped binaries or editing user dictionaries.
+Autostart is explicit and opt-in through Settings.
 
 The user installer copies the GUI to `~/.local/opt/telexmini`, creates a
 launcher under `~/.local/bin`, and registers the user-owned IBus descriptor
@@ -43,14 +54,17 @@ sudo. It never overrides the active desktop input source automatically.
 ## Verified on existing Ubuntu 26.10 test guest
 
 * Native C++ composer: 4,717 portable cases passed.
-* IBus: 13 integration cases passed in a development session.
-* Fcitx5: addon loaded in a private test session; direct typing in host apps
-  still requires testing.
-* Flutter UI: 8 widget tests passed and GNOME/Wayland window rendering was
-  verified. Skia is default on the VM's SVGA GPU.
-* `tools/install-linux-user.sh install` passed as a regular user. Files
-  were checked in ~/.local. Input-source activation in GNOME is **not**
-  yet verified after a fresh session.
+* IBus: **21 integration cases passed**, including shortcuts in V/E,
+  Telex/VNI and priority changes, dictionary reload and password handling
+  in an isolated QA engine.
+* Fcitx5: addon compiled and loaded in a private D-Bus test session; direct
+  typing in third-party host apps still requires testing.
+* Flutter UI: **34 widget tests passed**, analyzer zero issues, Linux release
+  built and installed GUI visibly rendered on GNOME/Wayland.
+* `tools/install-linux-user.sh install` passed as an ordinary user.
+  GUI, IBus and Fcitx5 installed binaries byte-match verified builds.
+  Autostart remained OFF; input-source activation after a fresh login still
+  requires testing.
 * Legacy .deb package created during development is deprecated because it
   requires sudo for system-wide installation.
 

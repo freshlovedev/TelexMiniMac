@@ -10,6 +10,8 @@ typedef struct _TelexMiniIBus {
     gboolean enabled;
     gboolean vni;
     gboolean reload_pending;
+    gboolean snippets_enabled;
+    GHashTable *snippets;
     gchar *config_dir;
     GFileMonitor *monitor;
 } TelexMiniIBus;
@@ -28,6 +30,49 @@ static gboolean config_bool(GKeyFile *file, const char *key, gboolean fallback) 
     if (error) { g_error_free(error); return fallback; }
     return value;
 }
+static void reload_snippets(TelexMiniIBus *self) {
+    if (!self->snippets) return;
+    g_hash_table_remove_all(self->snippets);
+    g_autofree gchar *path = g_build_filename(self->config_dir, "snippets.tsv", NULL);
+    g_autofree gchar *text = NULL;
+    gsize size = 0;
+    if (!g_file_get_contents(path, &text, &size, NULL) || size > 65536) return;
+    g_auto(GStrv) lines = g_strsplit(text, "\n", -1);
+    for(gsize i=0; lines[i] && g_hash_table_size(self->snippets)<256; i++) {
+        if (!*lines[i]) continue;
+        gchar *tab = strchr(lines[i], '\t');
+        if (!tab || strchr(tab+1,'\t')) continue;
+        g_autofree gchar *key = g_strndup(lines[i], tab-lines[i]);
+        const gchar *value = tab+1;
+        if(strlen(key)<2 || strlen(key)>48 || !*value || strlen(value)>1024)continue;
+        gboolean valid = TRUE;
+        for(const gchar *p=key;*p;p++)
+            if(*p<'a' || *p>'z') {valid=FALSE;break;}
+        if (valid) g_hash_table_replace(self->snippets, g_strdup(key), g_strdup(value));
+    }
+}
+static gchar *expand_snippet(TelexMiniIBus *self,const gchar *raw) {
+    const gchar *pattern = self->snippets_enabled && self->snippets
+      ? g_hash_table_lookup(self->snippets, raw) : NULL;
+    if (!pattern || strstr(pattern,"{clipboard}") || strstr(pattern,"{cursor}"))
+        return NULL;
+    g_autoptr(GDateTime) now = g_date_time_new_now_local();
+    g_autofree gchar *date = g_date_time_format(now,"%Y-%m-%d");
+    g_autofree gchar *time = g_date_time_format(now,"%H:%M");
+    g_autofree gchar *datetime = g_date_time_format(now,"%Y-%m-%d %H:%M");
+    g_auto(GStrv) date_split = g_strsplit(pattern, "{date}", -1);
+    g_autofree gchar *first = g_strjoinv(date, date_split);
+    g_auto(GStrv) time_split = g_strsplit(first, "{time}", -1);
+    g_autofree gchar *second = g_strjoinv(time, time_split);
+    g_auto(GStrv) dt_split = g_strsplit(second, "{datetime}", -1);
+    g_autofree gchar *third = g_strjoinv(datetime, dt_split);
+    g_auto(GStrv) crlf_split = g_strsplit(third, "\\r\\n", -1);
+    g_autofree gchar *fourth = g_strjoinv("\n", crlf_split);
+    g_auto(GStrv) lf_split = g_strsplit(fourth, "\\n", -1);
+    g_autofree gchar *fifth = g_strjoinv("\n", lf_split);
+    g_auto(GStrv) tab_split = g_strsplit(fifth, "\\t", -1);
+    return g_strjoinv("\t", tab_split);
+}
 static void apply_preferences(TelexMiniIBus *self) {
     if (!self->composer) return;
     g_autofree gchar *file_path = g_build_filename(self->config_dir, "preferences.ini", NULL);
@@ -36,8 +81,11 @@ static void apply_preferences(TelexMiniIBus *self) {
     g_autofree gchar *method = g_key_file_get_string(file, "TelexMini", "InputMethod", NULL);
     g_autofree gchar *priority = g_key_file_get_string(file, "TelexMini", "LanguagePriority", NULL);
     self->enabled = config_bool(file, "VietnameseEnabled", TRUE);
+    self->snippets_enabled = config_bool(file, "SnippetsEnabled", FALSE);
+    reload_snippets(self);
     self->vni = g_strcmp0(method, "VNI") == 0;
-    const gboolean smart = config_bool(file, "SmartEnglish", TRUE);
+    const gboolean smart = config_bool(file, "SmartEnglish", TRUE) &&
+        g_strcmp0(priority, "Vietnamese") != 0;
     const gboolean restore = config_bool(file, "RestoreInvalid", TRUE);
     const gboolean english_first = g_strcmp0(priority, "English") == 0;
     tm_configure(self->composer, smart, english_first, self->vni, restore);
@@ -50,13 +98,16 @@ static void on_file_changed(GFileMonitor *monitor, GFile *file, GFile *other,
     if (g_strcmp0(name, "preferences.ini") == 0 ||
         g_strcmp0(name, "dictionary-reload.flag") == 0 ||
         g_strcmp0(name, "EnglishWords.txt") == 0 ||
-        g_strcmp0(name, "VietnameseOverrides.txt") == 0) {
+        g_strcmp0(name, "VietnameseOverrides.txt") == 0 ||
+        g_strcmp0(name, "snippets.tsv") == 0) {
         self->reload_pending = TRUE;
     }
 }
 
 static void update(TelexMiniIBus *self) {
-    const char *text = tm_text(self->composer);
+    // With V off, opt-in snippets use literal English preedit.
+    const char *text = !self->enabled && self->snippets_enabled
+        ? tm_raw(self->composer) : tm_text(self->composer);
     if (!text) text = "";
     ibus_engine_update_preedit_text_with_mode(IBUS_ENGINE(self),
         ibus_text_new_from_string(text), (guint)g_utf8_strlen(text, -1),
@@ -69,9 +120,12 @@ static void clear(TelexMiniIBus *self) {
 static void commit(TelexMiniIBus *self) {
     const char *current = tm_text(self->composer);
     if (current && *current) {
+        g_autofree gchar *raw = g_strdup(tm_raw(self->composer));
         const char *result = tm_finish(self->composer);
-        if (result && *result)
-            ibus_engine_commit_text(IBUS_ENGINE(self), ibus_text_new_from_string(result));
+        g_autofree gchar *expansion = expand_snippet(self, raw);
+        const char *output = expansion ? expansion : (self->enabled ? result : raw);
+        if (output && *output)
+            ibus_engine_commit_text(IBUS_ENGINE(self), ibus_text_new_from_string(output));
     }
     clear(self);
 }
@@ -88,7 +142,7 @@ static gboolean on_key(IBusEngine *engine, guint keyval, guint keycode, guint st
         apply_preferences(self);
         self->reload_pending = FALSE;
     }
-    if (self->secure || !self->enabled) return FALSE;
+    if (self->secure || (!self->enabled && !self->snippets_enabled)) return FALSE;
     if (state & (IBUS_CONTROL_MASK | IBUS_MOD1_MASK | IBUS_SUPER_MASK)) {
         commit(self);
         return FALSE;
@@ -137,6 +191,7 @@ static void on_content_type(IBusEngine *engine, guint purpose, guint hints) {
 static void on_finalize(GObject *object) {
     TelexMiniIBus *self = (TelexMiniIBus*)object;
     g_clear_object(&self->monitor);
+    if (self->snippets) g_hash_table_unref(self->snippets);
     g_clear_pointer(&self->config_dir, g_free);
     tm_destroy(self->composer);
     self->composer = NULL;
@@ -151,6 +206,7 @@ static void telexmini_ibus_class_init(TelexMiniIBusClass *cls) {
     G_OBJECT_CLASS(cls)->finalize = on_finalize;
 }
 static void telexmini_ibus_init(TelexMiniIBus *self) {
+    self->snippets = g_hash_table_new_full(g_str_hash,g_str_equal,g_free,g_free);
     self->config_dir = configuration_dir();
     g_mkdir_with_parents(self->config_dir, 0700);
     g_autofree gchar *english = g_build_filename(self->config_dir, "EnglishWords.txt", NULL);
@@ -180,9 +236,14 @@ int main(int argc, char **argv) {
         return 1;
     }
     g_signal_connect(bus, "disconnected", G_CALLBACK(disconnected), NULL);
+    // QA must not compete with the active TelexMini IBus service.
+    const gboolean qa = g_strcmp0(g_getenv("TELEXMINI_QA_INSTANCE"), "1") == 0;
+    const char *engine_name = qa ? "telexmini-qa" : "telexmini";
+    const char *service_name = qa ? "org.freedesktop.IBus.TelexMiniQA"
+                                  : "org.freedesktop.IBus.TelexMini";
     IBusFactory *factory = ibus_factory_new(ibus_bus_get_connection(bus));
-    ibus_factory_add_engine(factory, "telexmini", telexmini_ibus_get_type());
-    if (!ibus_bus_request_name(bus, "org.freedesktop.IBus.TelexMini", 0)) {
+    ibus_factory_add_engine(factory, engine_name, telexmini_ibus_get_type());
+    if (!ibus_bus_request_name(bus, service_name, 0)) {
         g_printerr("TelexMini IBus: could not own service name\n");
         g_object_unref(factory);
         g_object_unref(bus);
@@ -201,12 +262,13 @@ int main(int argc, char **argv) {
             return 1;
         }
         IBusComponent *component = ibus_component_new(
-            "org.freedesktop.IBus.TelexMini", "TelexMini Vietnamese",
+            service_name, qa ? "TelexMini QA" : "TelexMini Vietnamese",
             "2.4.0", "Pre-release", "TelexMini", "",
             command, "telexmini");
         ibus_component_add_engine(component, ibus_engine_desc_new(
-            "telexmini", "TelexMini Vietnamese", "Vietnamese Telex/VNI",
-            "vi", "Proprietary preview", "TelexMini", "input-keyboard", "us"));
+            engine_name, qa ? "TelexMini QA" : "TelexMini Vietnamese",
+            "Vietnamese Telex/VNI", "vi", "Proprietary preview",
+            "TelexMini", "input-keyboard", "us"));
         if (!ibus_bus_register_component(bus, component)) {
             g_printerr("TelexMini IBus: component registration failed\n");
             g_object_unref(component);

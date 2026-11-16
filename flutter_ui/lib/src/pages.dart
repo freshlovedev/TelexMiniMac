@@ -1057,15 +1057,42 @@ class SettingsPage extends StatelessWidget {
                   },
                 ),
                 const SizedBox(height: 14),
-                _dropdown(
-                  controller.t('Phím chuyển V/E', 'V/E shortcut'),
-                  controller.hotkey,
-                  ['Ctrl + Shift + Space', 'Ctrl + Alt + V', 'Alt + Shift + V'],
-                  (v) {
-                    controller.hotkey = v;
-                    controller.save();
-                  },
-                ),
+                if (Platform.isLinux)
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.keyboard_outlined,
+                        size: 17,
+                        color: muted,
+                      ),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Text(
+                          controller.t(
+                            'Phím tắt V/E được quản lý trong cài đặt IBus/Fcitx5 của hệ thống. Có thể chuyển bằng Tổng quan.',
+                            'V/E shortcuts are managed in system IBus/Fcitx5 settings. You can also switch on Overview.',
+                          ),
+                          style: const TextStyle(fontSize: 11.5, color: muted),
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  _dropdown(
+                    controller.t('Phím chuyển V/E', 'V/E shortcut'),
+                    controller.hotkey,
+                    Platform.isMacOS
+                        ? ['Ctrl + Shift + Space', 'Ctrl + Alt + V']
+                        : [
+                            'Ctrl + Shift + Space',
+                            'Ctrl + Alt + V',
+                            'Alt + Shift + V',
+                          ],
+                    (v) {
+                      controller.hotkey = v;
+                      controller.save();
+                    },
+                  ),
               ],
             ),
           ),
@@ -1107,63 +1134,96 @@ class SettingsPage extends StatelessWidget {
                   },
                 ),
                 const Divider(height: 10),
-                PreferenceSwitch(
-                  title: controller.t(
-                    'Sửa nhanh từ vừa gõ',
-                    'Instant Word Repair',
+                if (Platform.isWindows) ...[
+                  PreferenceSwitch(
+                    title: controller.t(
+                      'Sửa nhanh từ vừa gõ',
+                      'Instant Word Repair',
+                    ),
+                    subtitle: controller.t(
+                      'Ctrl+Alt+Backspace ngay sau từ và dấu cách',
+                      'Ctrl+Alt+Backspace after a word and space',
+                    ),
+                    value: controller.instantRepairEnabled,
+                    onChanged: (v) {
+                      controller.instantRepairEnabled = v;
+                      controller.save();
+                    },
                   ),
-                  subtitle: controller.t(
-                    'Ctrl+Alt+Backspace ngay sau từ và dấu cách',
-                    'Ctrl+Alt+Backspace after a word and space',
+                  const Divider(height: 10),
+                  PreferenceSwitch(
+                    title: controller.t(
+                      'Từ điển tự học có xác nhận',
+                      'Adaptive Dictionary',
+                    ),
+                    subtitle: controller.t(
+                      'Chỉ học khi chủ động sửa lại một từ',
+                      'Learn only from an explicit word repair',
+                    ),
+                    value: controller.adaptiveLearningEnabled,
+                    onChanged: (v) {
+                      controller.adaptiveLearningEnabled = v;
+                      controller.save();
+                    },
                   ),
-                  value: controller.instantRepairEnabled,
-                  onChanged: (v) {
-                    controller.instantRepairEnabled = v;
-                    controller.save();
-                  },
-                ),
-                const Divider(height: 10),
-                PreferenceSwitch(
-                  title: controller.t(
-                    'Từ điển tự học có xác nhận',
-                    'Adaptive Dictionary',
+                  const Divider(height: 10),
+                  PreferenceSwitch(
+                    title: controller.t(
+                      'Dấu câu thông minh',
+                      'Smart Punctuation',
+                    ),
+                    subtitle: controller.t(
+                      'Tùy chọn viết hoa đầu câu, tránh dấu cách liên tiếp',
+                      'Optional sentence capitalization and duplicate-space guard',
+                    ),
+                    value: controller.smartPunctuationEnabled,
+                    onChanged: (v) {
+                      controller.smartPunctuationEnabled = v;
+                      controller.save();
+                    },
                   ),
-                  subtitle: controller.t(
-                    'Chỉ học khi chủ động sửa lại một từ',
-                    'Learn only from an explicit word repair',
+                  const Divider(height: 10),
+                ] else
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.info_outline_rounded,
+                          color: muted,
+                          size: 19,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            controller.t(
+                              'Sửa từ sau khi commit, học từ thích ứng và dấu câu thông minh hiện cần engine Windows; các công tắc này không được bật giả trên Mac/Linux.',
+                              'Committed-word repair, adaptive learning and smart punctuation require the Windows engine. Unsupported switches are not shown on Mac/Linux.',
+                            ),
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: muted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  value: controller.adaptiveLearningEnabled,
-                  onChanged: (v) {
-                    controller.adaptiveLearningEnabled = v;
-                    controller.save();
-                  },
-                ),
-                const Divider(height: 10),
-                PreferenceSwitch(
-                  title: controller.t(
-                    'Dấu câu thông minh',
-                    'Smart Punctuation',
-                  ),
-                  subtitle: controller.t(
-                    'Tùy chọn viết hoa đầu câu, tránh dấu cách liên tiếp',
-                    'Optional sentence capitalization and duplicate-space guard',
-                  ),
-                  value: controller.smartPunctuationEnabled,
-                  onChanged: (v) {
-                    controller.smartPunctuationEnabled = v;
-                    controller.save();
-                  },
-                ),
                 const Divider(height: 10),
                 PreferenceSwitch(
                   title: controller.t(
                     'Tự dùng English trong terminal',
                     'Use English in terminal',
                   ),
-                  subtitle: controller.t(
-                    'Giữ nguyên lệnh và mã nguồn',
-                    'Preserve commands and source code',
-                  ),
+                  subtitle: Platform.isLinux
+                      ? controller.t(
+                          'Hoạt động trong Fcitx5; IBus chưa nhận diện app để tự chuyển.',
+                          'Works with Fcitx5; IBus cannot reliably identify the app.',
+                        )
+                      : controller.t(
+                          'Giữ nguyên lệnh và mã nguồn',
+                          'Preserve commands and source code',
+                        ),
                   value: controller.terminalEnglish,
                   onChanged: (v) {
                     controller.terminalEnglish = v;
@@ -1179,34 +1239,67 @@ class SettingsPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SectionTitle('APPLICATION'),
-                if (Platform.isWindows) ...[
+                if (Platform.isWindows ||
+                    Platform.isMacOS ||
+                    Platform.isLinux) ...[
                   PreferenceSwitch(
                     title: controller.t(
                       'Khởi động cùng hệ thống',
                       'Launch at login',
                     ),
-                    subtitle: controller.t(
-                      'Tích hợp theo cơ chế của Windows',
-                      'Uses Windows startup settings',
-                    ),
+                    subtitle: Platform.isMacOS
+                        ? controller.t(
+                            'Sử dụng Login Items của macOS; có thể cần duyệt trong Cài đặt hệ thống',
+                            'Uses macOS Login Items; may require approval in System Settings',
+                          )
+                        : Platform.isLinux
+                        ? controller.t(
+                            'Tự khởi động IBus trong phiên GNOME, không tự chọn bộ gõ',
+                            'Starts IBus in GNOME; does not select the input source',
+                          )
+                        : controller.t(
+                            'Tích hợp theo cơ chế của Windows',
+                            'Uses Windows startup settings',
+                          ),
                     value: controller.autoStart,
-                    onChanged: (v) {
-                      controller.autoStart = v;
-                      controller.save();
+                    onChanged: (v) async {
+                      try {
+                        await controller.setAutoStart(v);
+                      } catch (_) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                controller.t(
+                                  'Không thể thay đổi khởi động cùng hệ thống. Kiểm tra cài đặt quyền đăng nhập.',
+                                  'Could not update login item. Check system login settings.',
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+                      }
                     },
                   ),
                   const Divider(height: 10),
                 ],
-                if (Platform.isWindows || Platform.isMacOS) ...[
+                if (Platform.isWindows ||
+                    Platform.isMacOS ||
+                    Platform.isLinux) ...[
                   PreferenceSwitch(
                     title: controller.t(
                       'Hồ sơ theo ứng dụng',
                       'Per-app profiles',
                     ),
-                    subtitle: controller.t(
-                      'Chọn chế độ nhập theo từng ứng dụng',
-                      'Choose input mode for each app',
-                    ),
+                    subtitle: Platform.isLinux
+                        ? controller.t(
+                            'Tự áp dụng với Fcitx5; IBus chưa cung cấp mã ứng dụng đáng tin cậy',
+                            'Automatic in Fcitx5; IBus lacks a reliable application ID',
+                          )
+                        : controller.t(
+                            'Chọn chế độ nhập theo từng ứng dụng',
+                            'Choose input mode for each app',
+                          ),
                     value: controller.profilesEnabled,
                     onChanged: (v) {
                       controller.profilesEnabled = v;

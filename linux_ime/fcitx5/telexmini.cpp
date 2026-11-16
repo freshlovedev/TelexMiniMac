@@ -17,6 +17,12 @@
 #include <unistd.h>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 
 namespace {
 std::string configDirectory() {
@@ -68,10 +74,80 @@ class Composition : public fcitx::InputContextProperty {
                             std::istreambuf_iterator<char>());
     vni_ = flags.find("InputMethod=VNI") != std::string::npos;
     enabled_ = flags.find("VietnameseEnabled=false") == std::string::npos;
-    const bool smart = flags.find("SmartEnglish=false") == std::string::npos;
-    const bool englishFirst = flags.find("LanguagePriority=English") != std::string::npos;
-    const bool restore = flags.find("RestoreInvalid=false") == std::string::npos;
-    if (composer_) tm_configure(composer_, smart, englishFirst, vni_, restore);
+    terminal_english_ = flags.find("AutoEnglish=true") != std::string::npos;
+    smart_ = flags.find("SmartEnglish=false") == std::string::npos;
+    english_first_ = flags.find("LanguagePriority=English") != std::string::npos;
+    vietnamese_first_ = flags.find("LanguagePriority=Vietnamese") != std::string::npos;
+    restore_ = flags.find("RestoreInvalid=false") == std::string::npos;
+    profiles_enabled_ = flags.find("ProfilesEnabled=true") != std::string::npos;
+    profiles_.clear();
+    if (profiles_enabled_) {
+      std::ifstream source(userPath("profiles.tsv"));
+      std::string line;
+      while(std::getline(source,line) && profiles_.size() < 200) {
+        const auto tab=line.find('\t');
+        if(tab==std::string::npos || line.find('\t',tab+1)!=std::string::npos)continue;
+        std::string key=line.substr(0,tab);
+        std::string mode=line.substr(tab+1);
+        std::transform(key.begin(),key.end(),key.begin(),[](unsigned char c) {
+          return static_cast<char>(std::tolower(c));
+        });
+        if(!mode.empty() && mode.back()=='\r')mode.pop_back();
+        if(key.empty() || key.size()>255 ||
+            (mode!="English" && mode!="Vietnamese" && mode!="Balanced"))continue;
+        profiles_[key]=mode;
+      }
+    }
+    snippets_enabled_ = flags.find("SnippetsEnabled=true") != std::string::npos;
+    snippets_.clear();
+    std::ifstream snippetsFile(userPath("snippets.tsv"));
+    std::string entry;
+    while (std::getline(snippetsFile, entry) && snippets_.size()<256) {
+      const auto tab=entry.find('\t');
+      if(tab==std::string::npos || entry.find('\t',tab+1)!=std::string::npos) continue;
+      const std::string key=entry.substr(0,tab);
+      const std::string value=entry.substr(tab+1);
+      if(key.size()<2 || key.size()>48 || value.empty() || value.size()>1024)continue;
+      bool valid=true;
+      for(char c:key) if(c<'a' || c>'z') {valid=false;break;}
+      if(valid)snippets_[key]=value;
+    }
+    applyProfile();
+  }
+  void applyProfile() {
+    if(!composer_)return;
+    last_program_ = context_->program();
+    std::string program=last_program_;
+    const auto slash=program.find_last_of('/');
+    if(slash!=std::string::npos)program=program.substr(slash+1);
+    std::transform(program.begin(),program.end(),program.begin(),[](unsigned char c) {
+      return static_cast<char>(std::tolower(c));
+    });
+    if(program.size()>4 && program.compare(program.size()-4,4,".exe")==0)
+      program.resize(program.size()-4);
+    auto it=profiles_.find(program);
+    profile_mode_ = profiles_enabled_ && it!=profiles_.end() ? it->second : "Default";
+    const bool english = profile_mode_=="English" ||
+      (profile_mode_!="Vietnamese" && english_first_);
+    const bool smart = profile_mode_=="Vietnamese" ? false :
+      (smart_ && !vietnamese_first_);
+    tm_configure(composer_,smart,english,vni_,restore_);
+  }
+  bool literalMode() const {
+    if (!enabled_ || profile_mode_=="English") return true;
+    if (!terminal_english_) return false;
+    std::string app=last_program_;
+    const auto slash=app.find_last_of('/');
+    if (slash!=std::string::npos)app=app.substr(slash+1);
+    std::transform(app.begin(),app.end(),app.begin(),[](unsigned char c) {
+      return static_cast<char>(std::tolower(c));
+    });
+    static const char* terminals[] = {
+      "gnome-terminal-server","gnome-terminal","kgx","konsole",
+      "alacritty","kitty","ghostty","xterm","wezterm","foot","tilix"
+    };
+    for (const auto* name: terminals) if (app==name)return true;
+    return false;
   }
   void maybeReload() {
     if (watch_fd_ < 0) return;
@@ -87,7 +163,9 @@ class Composition : public fcitx::InputContextProperty {
             std::strcmp(name, "preferences.ini") == 0 ||
             std::strcmp(name, "dictionary-reload.flag") == 0 ||
             std::strcmp(name, "EnglishWords.txt") == 0 ||
-            std::strcmp(name, "VietnameseOverrides.txt") == 0) {
+            std::strcmp(name, "VietnameseOverrides.txt") == 0 ||
+            std::strcmp(name, "snippets.tsv") == 0 ||
+            std::strcmp(name, "profiles.tsv") == 0) {
           dirty = true;
         }
         pos += static_cast<ssize_t>(sizeof(inotify_event) + event->len);
@@ -102,7 +180,10 @@ class Composition : public fcitx::InputContextProperty {
   void refresh() {
     auto &panel = context_->inputPanel();
     panel.reset();
-    const std::string text = composer_ && tm_text(composer_) ? tm_text(composer_) : "";
+    const char* composed = composer_ ?
+        (literalMode() && snippets_enabled_
+          ? tm_raw(composer_) : tm_text(composer_)) : nullptr;
+    const std::string text = composed ? composed : "";
     if (!text.empty()) {
       if (context_->capabilityFlags().test(fcitx::CapabilityFlag::Preedit)) {
         panel.setClientPreedit(fcitx::Text(text));
@@ -113,10 +194,45 @@ class Composition : public fcitx::InputContextProperty {
     context_->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     context_->updatePreedit();
   }
+  static void replaceMacro(std::string& text,const std::string& tag,
+                           const std::string& value) {
+    size_t pos=0;
+    while((pos=text.find(tag,pos))!=std::string::npos) {
+      text.replace(pos,tag.size(),value);
+      pos+=value.size();
+    }
+  }
+  std::string snippetFor(const std::string& raw) const {
+    if(!snippets_enabled_)return "";
+    auto it=snippets_.find(raw);
+    if(it==snippets_.end())return "";
+    auto expanded=it->second;
+    if(expanded.find("{clipboard}")!=std::string::npos ||
+       expanded.find("{cursor}")!=std::string::npos)return "";
+    const auto now=std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm local{};
+    localtime_r(&now,&local);
+    std::ostringstream date,time;
+    date<<std::put_time(&local,"%Y-%m-%d");
+    time<<std::put_time(&local,"%H:%M");
+    std::ostringstream datetime;
+    datetime<<std::put_time(&local,"%Y-%m-%d %H:%M");
+    replaceMacro(expanded,"{date}",date.str());
+    replaceMacro(expanded,"{time}",time.str());
+    replaceMacro(expanded,"{datetime}",datetime.str());
+    replaceMacro(expanded,"\\r\\n","\n");
+    replaceMacro(expanded,"\\n","\n");
+    replaceMacro(expanded,"\\t","\t");
+    return expanded;
+  }
   void commit() {
     if (composer_ && hasComposition(composer_)) {
+      const std::string raw=tm_raw(composer_);
       const char* final = tm_finish(composer_);
-      if (final && *final) context_->commitString(final);
+      const std::string expanded=snippetFor(raw);
+      if(!expanded.empty())context_->commitString(expanded);
+      else if (literalMode()) context_->commitString(raw);
+      else if (final && *final) context_->commitString(final);
     }
     if (composer_) tm_reset(composer_);
     refresh();
@@ -134,7 +250,11 @@ class Composition : public fcitx::InputContextProperty {
       return;
     }
     maybeReload();
-    if (!enabled_) return;
+    if (last_program_ != context_->program()) {
+      if (hasComposition(composer_)) commit();
+      applyProfile();
+    }
+    if (literalMode() && !snippets_enabled_) return;
     const auto key = event.key();
     // Preserve desktop shortcuts and application accelerators.
     if (key.states().test(fcitx::KeyState::Ctrl) ||
@@ -171,6 +291,17 @@ class Composition : public fcitx::InputContextProperty {
   tm_composer* composer_;
   bool vni_ = false;
   bool enabled_ = true;
+  bool snippets_enabled_ = false;
+  bool smart_ = true;
+  bool english_first_ = false;
+  bool vietnamese_first_ = false;
+  bool restore_ = true;
+  bool profiles_enabled_ = false;
+  bool terminal_english_ = false;
+  std::string last_program_;
+  std::string profile_mode_ = "Default";
+  std::unordered_map<std::string,std::string> snippets_;
+  std::unordered_map<std::string,std::string> profiles_;
   int watch_fd_ = -1;
 };
 

@@ -15,6 +15,8 @@ class _MockNative {
   String priority = 'Balanced';
   bool rejectDictionary = false;
   bool rejectSnippets = false;
+  bool rejectPreferences = false;
+  bool autoStart = false;
   int snippetWrites = 0;
   final calls = <MethodCall>[];
   final english = <String>[];
@@ -28,6 +30,7 @@ class _MockNative {
           'vietnameseEnabled': true,
           'automaticMode': true,
           'languagePriority': priority,
+          'autoStart': autoStart,
         };
       case 'loadDictionary':
         final args = Map<String, dynamic>.from(call.arguments as Map);
@@ -60,7 +63,14 @@ class _MockNative {
           ..addAll((args['words'] as List).cast<String>());
         return null;
       case 'applyPreferences':
+        if (rejectPreferences) {
+          throw PlatformException(
+            code: 'LOCAL_STORAGE',
+            message: 'login item not available',
+          );
+        }
         priority = (call.arguments as Map)['languagePriority'] as String;
+        autoStart = (call.arguments as Map)['autoStart'] as bool? ?? autoStart;
         return null;
       default:
         return null;
@@ -178,6 +188,36 @@ void main() {
     },
   );
 
+  test(
+    'desktop autostart reflects real native registration failures',
+    () async {
+      final mock = _MockNative();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, mock.handle);
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+      final controller = _isolated();
+      await controller.load();
+      expect(controller.autoStart, false);
+      mock.rejectPreferences = true;
+      await expectLater(
+        controller.setAutoStart(true),
+        throwsA(isA<PlatformException>()),
+      );
+      expect(controller.autoStart, false);
+      expect(mock.autoStart, false);
+      mock.rejectPreferences = false;
+      await controller.setAutoStart(true);
+      expect(controller.autoStart, true);
+      expect(mock.autoStart, true);
+      await controller.setAutoStart(false);
+      expect(controller.autoStart, false);
+      expect(mock.autoStart, false);
+    },
+  );
+
   test('real composer oracle scenarios differ in all three priorities', () {
     expect(
       LabModeCases.forMode('Balanced')
@@ -255,6 +295,26 @@ void main() {
       await tester.pump(const Duration(milliseconds: 250));
       expect(controller.languagePriority, 'English');
       expect(find.byKey(const Key('priority-English')), findsOneWidget);
+
+      await controller.setPage(AppPage.applications);
+      await tester.pump(const Duration(milliseconds: 250));
+      if (Platform.isLinux) {
+        expect(find.text('Chọn EXE'), findsNothing);
+        expect(find.textContaining('IBus'), findsWidgets);
+      }
+      if (Platform.isMacOS) {
+        expect(find.text('Chọn .app'), findsOneWidget);
+      }
+
+      await controller.setPage(AppPage.settings);
+      await tester.pump(const Duration(milliseconds: 250));
+      if (Platform.isLinux || Platform.isMacOS) {
+        expect(find.text('Sửa nhanh từ vừa gõ'), findsNothing);
+        expect(find.textContaining('Sửa từ sau khi commit'), findsWidgets);
+      } else {
+        expect(find.text('Sửa nhanh từ vừa gõ'), findsOneWidget);
+      }
+      expect(tester.takeException(), isNull);
     },
   );
 }

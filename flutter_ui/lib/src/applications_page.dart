@@ -255,12 +255,18 @@ class _ApplicationsPageState extends State<ApplicationsPage> {
                           tooltip: c.t('Quét lại', 'Refresh'),
                           icon: const Icon(Icons.refresh),
                         ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: chooseExecutable,
-                          icon: const Icon(Icons.folder_open_outlined),
-                          label: Text(c.t('Chọn EXE', 'Choose EXE')),
-                        ),
+                        if (!Platform.isLinux) ...[
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: chooseExecutable,
+                            icon: const Icon(Icons.folder_open_outlined),
+                            label: Text(
+                              Platform.isMacOS
+                                  ? c.t('Chọn .app', 'Choose .app')
+                                  : c.t('Chọn EXE', 'Choose EXE'),
+                            ),
+                          ),
+                        ],
                         const SizedBox(width: 8),
                         PrimaryAction(
                           label: c.t('Thêm ứng dụng', 'Add application'),
@@ -275,10 +281,15 @@ class _ApplicationsPageState extends State<ApplicationsPage> {
                         'Quy tắc riêng theo ứng dụng',
                         'Per-application rules',
                       ),
-                      subtitle: c.t(
-                        'Chọn ngôn ngữ cho từng ứng dụng',
-                        'Choose a language for each application',
-                      ),
+                      subtitle: Platform.isLinux
+                          ? c.t(
+                              'Fcitx5 áp dụng theo chương trình. IBus chưa xác định được ứng dụng đích.',
+                              'Fcitx5 applies per program; IBus lacks target-application identity.',
+                            )
+                          : c.t(
+                              'Chọn ngôn ngữ cho từng ứng dụng',
+                              'Choose a language for each application',
+                            ),
                       value: c.profilesEnabled,
                       onChanged: (v) {
                         c.profilesEnabled = v;

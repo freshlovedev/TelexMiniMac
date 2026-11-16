@@ -183,6 +183,26 @@ import Foundation
            let expanded=ProductivityCore.expand("today",rules:macro,enabled:true),
            expanded.count==10 && expanded.contains("-") {passed+=1}
         else {failed+=1}
+        let extended="clip\t{clipboard}\ndatetime\t{datetime}\nmultiline\tline1\\nline2\ncursor\t{cursor}"
+        if let macros=ProductivityCore.validateSnippets(extended) {
+            var clipboardReads=0
+            let value=ProductivityCore.expand("clip",rules:macros,enabled:true,
+                clipboardProvider:{ clipboardReads += 1; return "a\nb\tc" })
+            if value=="a b c" && clipboardReads==1 {passed+=1}
+            else {failed+=1;print("FAIL clipboard on explicit trigger")}
+            _=ProductivityCore.expand("datetime",rules:macros,enabled:true)
+            if clipboardReads==1 {passed+=1}
+            else {failed+=1;print("FAIL macro read clipboard without trigger")}
+            if let timestamp=ProductivityCore.expand("datetime",rules:macros,enabled:true),
+               timestamp.count==16 && timestamp.contains(" ") {passed+=1}
+            else {failed+=1;print("FAIL datetime macro")}
+            if ProductivityCore.expand("multiline",rules:macros,enabled:true)=="line1\nline2" {
+                passed+=1
+            } else {failed+=1;print("FAIL multiline snippet")}
+            if ProductivityCore.expand("cursor",rules:macros,enabled:true)==nil {
+                passed+=1
+            } else {failed+=1;print("FAIL unsupported cursor marker")}
+        } else {failed+=1;print("FAIL extended snippet validation")}
         if let profiles=ProductivityCore.validateProfiles("com.microsoft.vscode\tEnglish\ncom.google.Chrome\tBalanced") {
             if ProductivityCore.profile(for:"com.microsoft.vscode",rules:profiles)=="English" {passed+=1}
             else {failed+=1}
